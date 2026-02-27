@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SNOW2 Web Demo</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>SNOW2 ❄️ Web Demo</h1>
+      <p class="subtitle">A modern Rust tribute to Matthew Kwan’s SNOW. Runs 100% in your browser (WASM).</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Security settings</h2>
+
+      <div class="grid">
+        <label>
+          Password
+          <input id="password" type="password" placeholder="Enter password" autocomplete="off" />
+        </label>
+
+        <label>
+          Pepper / “Signal Key” (optional)
+          <input id="pepper" type="password" placeholder="Optional second secret" autocomplete="off" />
+        </label>
+
+        <label class="checkbox">
+          <input id="pepperRequired" type="checkbox" />
+          Require pepper to decrypt (authenticated policy)
+        </label>
+      </div>
+
+      <div class="grid kdf">
+        <label>
+          Argon2 memory (MiB)
+          <input id="kdfMib" type="number" min="8" step="8" value="64" />
+        </label>
+
+        <label>
+          Argon2 iterations
+          <input id="kdfIters" type="number" min="1" step="1" value="3" />
+        </label>
+
+        <label>
+          Argon2 parallelism
+          <input id="kdfPar" type="number" min="1" step="1" value="1" />
+        </label>
+      </div>
+
+      <p class="note">
+        Browser demo uses <b>websafe-zw</b> mode (zero-width embedding). Some platforms may strip zero-width characters.
+        For strongest reliability, use the CLI with file-based carriers.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Embed</h2>
+      <label>
+        Message to hide
+        <textarea id="message" rows="4" placeholder="Type a message to hide..."></textarea>
+      </label>
+
+      <label>
+        Carrier text (must have many non-empty lines)
+        <textarea id="carrier" rows="10" placeholder="Paste or generate carrier text here..."></textarea>
+      </label>
+
+      <div class="row">
+        <button id="genCarrier">Generate carrier (6000 lines)</button>
+        <button id="embedBtn">Embed →</button>
+      </div>
+
+      <label>
+        Output carrier (copy / download)
+        <textarea id="outCarrier" rows="10" readonly></textarea>
+      </label>
+
+      <div class="row">
+        <button id="downloadCarrier">Download output carrier .txt</button>
+      </div>
+
+      <div id="embedStatus" class="status"></div>
+    </section>
+
+    <section class="card">
+      <h2>Extract</h2>
+
+      <label>
+        Carrier to extract from
+        <textarea id="extractCarrier" rows="10" placeholder="Paste the output carrier here..."></textarea>
+      </label>
+
+      <div class="row">
+        <button id="extractBtn">Extract →</button>
+        <button id="downloadRecovered">Download recovered.bin</button>
+      </div>
+
+      <label>
+        Recovered (UTF-8 if possible)
+        <textarea id="recoveredText" rows="6" readonly></textarea>
+      </label>
+
+      <label>
+        Recovered (base64)
+        <textarea id="recoveredB64" rows="4" readonly></textarea>
+      </label>
+
+      <div id="extractStatus" class="status"></div>
+    </section>
+
+    <section class="card subtle">
+      <h2>Tribute</h2>
+      <p>
+        SNOW2 is inspired by Matthew Kwan’s original SNOW — a clever, educational demo of whitespace steganography + encryption.
+        This web demo is for learning and testing. Don’t treat browsers as a security boundary.
+      </p>
+      <p class="dedication">
+        Dedicated to my Dad — a Navy veteran who knew Morse code. We love you and miss you.
+      </p>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

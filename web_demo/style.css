@@ -1,0 +1,119 @@
+:root {
+  --bg: #0b0f14;
+  --card: #121824;
+  --text: #e7eefc;
+  --muted: #9fb0cf;
+  --accent: #7fb7ff;
+  --danger: #ff7f7f;
+  --ok: #7fffb7;
+  --border: #223049;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  padding: 24px 16px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+h1 { margin: 0 0 6px; font-size: 28px; }
+.subtitle { margin: 0; color: var(--muted); }
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.card.subtle { background: #0f1520; }
+
+h2 { margin: 0 0 12px; font-size: 18px; }
+
+label {
+  display: block;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+input, textarea, button {
+  width: 100%;
+  margin-top: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0b1220;
+  color: var(--text);
+  padding: 10px;
+  font-size: 14px;
+}
+
+textarea { resize: vertical; }
+
+.row {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.row button { width: auto; flex: 1; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+
+.grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.grid.kdf { grid-template-columns: repeat(3, 1fr); }
+
+.checkbox {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox input { width: auto; margin: 0; }
+
+.note {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.status {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 18px;
+}
+
+.status.ok { color: var(--ok); }
+.status.err { color: var(--danger); }
+
+.dedication {
+  margin-top: 10px;
+  color: var(--muted);
+  font-style: italic;
+}

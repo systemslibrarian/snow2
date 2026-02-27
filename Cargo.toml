@@ -10,6 +10,9 @@ readme = "README.md"
 keywords = ["steganography", "crypto", "whitespace", "snow", "security"]
 categories = ["cryptography", "command-line-utilities"]
 
+[workspace]
+members = ["snow2_wasm"]
+
 [dependencies]
 # CLI
 clap = { version = "4.5", features = ["derive"] }
