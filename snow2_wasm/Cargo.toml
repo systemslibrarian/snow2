@@ -5,6 +5,9 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 publish = false
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 [lib]
 crate-type = ["cdylib"]
 
