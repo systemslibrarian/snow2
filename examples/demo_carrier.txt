@@ -1,0 +1,258 @@
+SNOW2 demo carrier — this text is intentionally boring.
+
+Line 001: Nothing to see here.
+Line 002: Still nothing.
+Line 003: Just ordinary text.
+Line 004: A tribute to clever old-school demos.
+Line 005: Whitespace can hide secrets.
+Line 006: Cryptography protects meaning.
+Line 007: Steganography hides existence.
+Line 008: This carrier is long on purpose.
+Line 009: Many lines are required right now because we embed 1 bit per line.
+Line 010: Later we can increase density and add redundancy.
+Line 011: For now we keep it simple and correct.
+Line 012: SNOW2 is a modern rewrite with modern AEAD and Argon2id.
+Line 013: XChaCha20-Poly1305 is used for authenticated encryption.
+Line 014: The container header is authenticated as AAD.
+Line 015: Tampering must fail closed.
+
+Line 016: Demo continues.
+Line 017: Demo continues.
+Line 018: Demo continues.
+Line 019: Demo continues.
+Line 020: Demo continues.
+Line 021: Demo continues.
+Line 022: Demo continues.
+Line 023: Demo continues.
+Line 024: Demo continues.
+Line 025: Demo continues.
+Line 026: Demo continues.
+Line 027: Demo continues.
+Line 028: Demo continues.
+Line 029: Demo continues.
+Line 030: Demo continues.
+Line 031: Demo continues.
+Line 032: Demo continues.
+Line 033: Demo continues.
+Line 034: Demo continues.
+Line 035: Demo continues.
+Line 036: Demo continues.
+Line 037: Demo continues.
+Line 038: Demo continues.
+Line 039: Demo continues.
+Line 040: Demo continues.
+Line 041: Demo continues.
+Line 042: Demo continues.
+Line 043: Demo continues.
+Line 044: Demo continues.
+Line 045: Demo continues.
+Line 046: Demo continues.
+Line 047: Demo continues.
+Line 048: Demo continues.
+Line 049: Demo continues.
+Line 050: Demo continues.
+
+Line 051: Demo continues.
+Line 052: Demo continues.
+Line 053: Demo continues.
+Line 054: Demo continues.
+Line 055: Demo continues.
+Line 056: Demo continues.
+Line 057: Demo continues.
+Line 058: Demo continues.
+Line 059: Demo continues.
+Line 060: Demo continues.
+Line 061: Demo continues.
+Line 062: Demo continues.
+Line 063: Demo continues.
+Line 064: Demo continues.
+Line 065: Demo continues.
+Line 066: Demo continues.
+Line 067: Demo continues.
+Line 068: Demo continues.
+Line 069: Demo continues.
+Line 070: Demo continues.
+Line 071: Demo continues.
+Line 072: Demo continues.
+Line 073: Demo continues.
+Line 074: Demo continues.
+Line 075: Demo continues.
+Line 076: Demo continues.
+Line 077: Demo continues.
+Line 078: Demo continues.
+Line 079: Demo continues.
+Line 080: Demo continues.
+Line 081: Demo continues.
+Line 082: Demo continues.
+Line 083: Demo continues.
+Line 084: Demo continues.
+Line 085: Demo continues.
+Line 086: Demo continues.
+Line 087: Demo continues.
+Line 088: Demo continues.
+Line 089: Demo continues.
+Line 090: Demo continues.
+Line 091: Demo continues.
+Line 092: Demo continues.
+Line 093: Demo continues.
+Line 094: Demo continues.
+Line 095: Demo continues.
+Line 096: Demo continues.
+Line 097: Demo continues.
+Line 098: Demo continues.
+Line 099: Demo continues.
+Line 100: Demo continues.
+
+Line 101: We need lots of lines right now.
+Line 102: Because 1 bit per line is intentionally simple.
+Line 103: Once we increase density, this can shrink a lot.
+Line 104: But correctness first.
+Line 105: And a fun tribute.
+Line 106: SNOW2 ❄️
+Line 107: Inspired by Matthew Kwan’s SNOW.
+Line 108: Built in Rust.
+Line 109: Modern crypto, old-school delight.
+Line 110: End of short section.
+
+Line 111: Padding.
+Line 112: Padding.
+Line 113: Padding.
+Line 114: Padding.
+Line 115: Padding.
+Line 116: Padding.
+Line 117: Padding.
+Line 118: Padding.
+Line 119: Padding.
+Line 120: Padding.
+Line 121: Padding.
+Line 122: Padding.
+Line 123: Padding.
+Line 124: Padding.
+Line 125: Padding.
+Line 126: Padding.
+Line 127: Padding.
+Line 128: Padding.
+Line 129: Padding.
+Line 130: Padding.
+Line 131: Padding.
+Line 132: Padding.
+Line 133: Padding.
+Line 134: Padding.
+Line 135: Padding.
+Line 136: Padding.
+Line 137: Padding.
+Line 138: Padding.
+Line 139: Padding.
+Line 140: Padding.
+Line 141: Padding.
+Line 142: Padding.
+Line 143: Padding.
+Line 144: Padding.
+Line 145: Padding.
+Line 146: Padding.
+Line 147: Padding.
+Line 148: Padding.
+Line 149: Padding.
+Line 150: Padding.
+
+Line 151: Padding.
+Line 152: Padding.
+Line 153: Padding.
+Line 154: Padding.
+Line 155: Padding.
+Line 156: Padding.
+Line 157: Padding.
+Line 158: Padding.
+Line 159: Padding.
+Line 160: Padding.
+Line 161: Padding.
+Line 162: Padding.
+Line 163: Padding.
+Line 164: Padding.
+Line 165: Padding.
+Line 166: Padding.
+Line 167: Padding.
+Line 168: Padding.
+Line 169: Padding.
+Line 170: Padding.
+Line 171: Padding.
+Line 172: Padding.
+Line 173: Padding.
+Line 174: Padding.
+Line 175: Padding.
+Line 176: Padding.
+Line 177: Padding.
+Line 178: Padding.
+Line 179: Padding.
+Line 180: Padding.
+Line 181: Padding.
+Line 182: Padding.
+Line 183: Padding.
+Line 184: Padding.
+Line 185: Padding.
+Line 186: Padding.
+Line 187: Padding.
+Line 188: Padding.
+Line 189: Padding.
+Line 190: Padding.
+Line 191: Padding.
+Line 192: Padding.
+Line 193: Padding.
+Line 194: Padding.
+Line 195: Padding.
+Line 196: Padding.
+Line 197: Padding.
+Line 198: Padding.
+Line 199: Padding.
+Line 200: Padding.
+
+Line 201: Padding.
+Line 202: Padding.
+Line 203: Padding.
+Line 204: Padding.
+Line 205: Padding.
+Line 206: Padding.
+Line 207: Padding.
+Line 208: Padding.
+Line 209: Padding.
+Line 210: Padding.
+Line 211: Padding.
+Line 212: Padding.
+Line 213: Padding.
+Line 214: Padding.
+Line 215: Padding.
+Line 216: Padding.
+Line 217: Padding.
+Line 218: Padding.
+Line 219: Padding.
+Line 220: Padding.
+Line 221: Padding.
+Line 222: Padding.
+Line 223: Padding.
+Line 224: Padding.
+Line 225: Padding.
+Line 226: Padding.
+Line 227: Padding.
+Line 228: Padding.
+Line 229: Padding.
+Line 230: Padding.
+Line 231: Padding.
+Line 232: Padding.
+Line 233: Padding.
+Line 234: Padding.
+Line 235: Padding.
+Line 236: Padding.
+Line 237: Padding.
+Line 238: Padding.
+Line 239: Padding.
+Line 240: Padding.
+Line 241: Padding.
+Line 242: Padding.
+Line 243: Padding.
+Line 244: Padding.
+Line 245: Padding.
+Line 246: Padding.
+Line 247: Padding.
+Line 248: Padding.
+Line 249: Padding.
+Line 250: Padding.
