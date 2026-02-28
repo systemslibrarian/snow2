@@ -178,8 +178,8 @@ fn websafe_markers_survive_if_preserved() {
     let embedded = snow2::stego::websafe_zw::embed_bits(&carrier, &bits_in)
         .expect("embed_bits should succeed");
 
-    let bits_out = snow2::stego::websafe_zw::extract_bits(&embedded)
-        .expect("extract_bits should succeed");
+    let bits_out =
+        snow2::stego::websafe_zw::extract_bits(&embedded).expect("extract_bits should succeed");
 
     assert_eq!(bits_out, bits_in);
 }
@@ -198,14 +198,9 @@ fn websafe_stripping_all_zw_chars_destroys_data() {
         .expect("embed should succeed");
 
     // Strip all zero-width chars (simulates aggressive Unicode normalization)
-    let stripped = out
-        .replace('\u{200B}', "")
-        .replace('\u{200C}', "")
-        .replace('\u{200D}', "")
-        .replace('\u{FEFF}', "");
+    let stripped = out.replace(['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'], "");
 
-    let err = snow2::extract(Mode::WebSafeZeroWidth, &stripped, password, None, None)
-        .unwrap_err();
+    let err = snow2::extract(Mode::WebSafeZeroWidth, &stripped, password, None, None).unwrap_err();
     let _ = format!("{err:#}");
     // Must fail, not succeed with garbage data
 }
@@ -228,8 +223,7 @@ fn classic_trailing_whitespace_stripping_destroys_data() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let err = snow2::extract(Mode::ClassicTrailing, &stripped, password, None, None)
-        .unwrap_err();
+    let err = snow2::extract(Mode::ClassicTrailing, &stripped, password, None, None).unwrap_err();
     let _ = format!("{err:#}");
     // Must fail — integrity protection working
 }

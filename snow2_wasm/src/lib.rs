@@ -1,6 +1,10 @@
 use wasm_bindgen::prelude::*;
 
-use snow2::{config::{EmbedOptions, EmbedSecurityOptions}, crypto::KdfParams, Mode};
+use snow2::{
+    config::{EmbedOptions, EmbedSecurityOptions},
+    crypto::KdfParams,
+    Mode,
+};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -19,19 +23,24 @@ struct ExtractResult {
     bytes_len: usize,
 }
 
-fn build_opts(pepper_required: bool, kdf_mib: u32, kdf_iters: u32, kdf_par: u32) -> EmbedSecurityOptions {
+fn build_opts(
+    pepper_required: bool,
+    kdf_mib: u32,
+    kdf_iters: u32,
+    kdf_par: u32,
+) -> EmbedSecurityOptions {
     // WASM-safe limits: browsers typically have 1–4 GB total memory.
     // Cap KDF to values that won't OOM a browser tab.
-    const WASM_MAX_MIB: u32  = 128;  // keep under ~128 MiB for Argon2 in WASM
-    const WASM_MAX_ITERS: u32 = 8;   // more than 8 is painfully slow in WASM
-    const WASM_MAX_PAR: u32  = 4;    // limited benefit in single-threaded WASM
-    const WASM_MIN_MIB: u32  = 8;
+    const WASM_MAX_MIB: u32 = 128; // keep under ~128 MiB for Argon2 in WASM
+    const WASM_MAX_ITERS: u32 = 8; // more than 8 is painfully slow in WASM
+    const WASM_MAX_PAR: u32 = 4; // limited benefit in single-threaded WASM
+    const WASM_MIN_MIB: u32 = 8;
     const WASM_MIN_ITERS: u32 = 1;
-    const WASM_MIN_PAR: u32  = 1;
+    const WASM_MIN_PAR: u32 = 1;
 
-    let clamped_mib   = kdf_mib.max(WASM_MIN_MIB).min(WASM_MAX_MIB);
+    let clamped_mib = kdf_mib.max(WASM_MIN_MIB).min(WASM_MAX_MIB);
     let clamped_iters = kdf_iters.max(WASM_MIN_ITERS).min(WASM_MAX_ITERS);
-    let clamped_par   = kdf_par.max(WASM_MIN_PAR).min(WASM_MAX_PAR);
+    let clamped_par = kdf_par.max(WASM_MIN_PAR).min(WASM_MAX_PAR);
 
     // V4 requires m_cost_kib to be a power of 2 (for log2 encoding).
     // Round down to the nearest power of 2 (at minimum 8 MiB = 8192 KiB).
@@ -69,10 +78,15 @@ pub fn embed_websafe_zw(
     let opts = build_opts(pepper_required, kdf_mib, kdf_iters, kdf_par);
 
     if opts.pepper_required && pepper.as_deref().map(|s| s.is_empty()).unwrap_or(true) {
-        return Err(JsValue::from_str("Pepper is required by policy, but none was provided."));
+        return Err(JsValue::from_str(
+            "Pepper is required by policy, but none was provided.",
+        ));
     }
 
-    let embed_opts = EmbedOptions { security: opts, ..Default::default() };
+    let embed_opts = EmbedOptions {
+        security: opts,
+        ..Default::default()
+    };
 
     let out = snow2::embed_with_options(
         Mode::WebSafeZeroWidth,
@@ -113,5 +127,6 @@ pub fn extract_websafe_zw(
         bytes_len: bytes.len(),
     };
 
-    serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&format!("serde error: {e}")))
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsValue::from_str(&format!("serde error: {e}")))
 }

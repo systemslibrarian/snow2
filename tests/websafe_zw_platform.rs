@@ -37,11 +37,11 @@ fn full_zwsp_zwnj_strip_fails_cleanly() {
     let password = b"pw";
     let payload = b"secret message";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Strip every ZWSP and ZWNJ (Discord / Slack behavior)
-    let stripped = stego.replace(ZW0, "").replace(ZW1, "");
+    let stripped = stego.replace([ZW0, ZW1], "");
 
     let err = snow2::extract(Mode::WebSafeZeroWidth, &stripped, password, None, None);
     assert!(err.is_err(), "full strip must fail, not silently succeed");
@@ -55,8 +55,8 @@ fn strip_only_zwsp_fails() {
     let password = b"pw";
     let payload = b"test data";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Strip only ZWSP, leave ZWNJ
     let mangled = stego.replace(ZW0, "");
@@ -72,8 +72,8 @@ fn strip_only_zwnj_fails() {
     let password = b"pw";
     let payload = b"test data 2";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     let mangled = stego.replace(ZW1, "");
 
@@ -90,8 +90,8 @@ fn random_partial_strip_fails() {
     let password = b"pw";
     let payload = b"partial strip test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Strip ZW chars from every 3rd line
     let mangled: String = stego
@@ -99,7 +99,7 @@ fn random_partial_strip_fails() {
         .enumerate()
         .map(|(i, line)| {
             if i % 3 == 0 {
-                line.replace(ZW0, "").replace(ZW1, "")
+                line.replace([ZW0, ZW1], "")
             } else {
                 line.to_string()
             }
@@ -124,14 +124,17 @@ fn nfkc_normalization_strips_zw_fails() {
     let password = b"pw";
     let payload = b"nfkc test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // NFKC normalization effect: ZW format chars are removed
-    let normalized = stego.replace(ZW0, "").replace(ZW1, "");
+    let normalized = stego.replace([ZW0, ZW1], "");
 
     let err = snow2::extract(Mode::WebSafeZeroWidth, &normalized, password, None, None);
-    assert!(err.is_err(), "NFKC normalization must cause extraction failure");
+    assert!(
+        err.is_err(),
+        "NFKC normalization must cause extraction failure"
+    );
 }
 
 /// Some normalizers replace ZWSP with normal space. This changes the
@@ -143,8 +146,8 @@ fn zwsp_replaced_with_normal_space_fails() {
     let password = b"pw";
     let payload = b"space replace test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Replace ZWSP with regular space (some clipboard sanitizers do this)
     let mangled = stego.replace(ZW0, " ");
@@ -163,8 +166,10 @@ fn zwsp_replaced_with_normal_space_fails() {
 #[test]
 fn bom_injection_at_line_end_truncates() {
     // With 8 bits/line, embed 16 bits across 2 lines
-    let bits_in = vec![true, false, true, false, true, false, true, false,
-                       false, true, false, true, false, true, false, true];
+    let bits_in = vec![
+        true, false, true, false, true, false, true, false, false, true, false, true, false, true,
+        false, true,
+    ];
     let c = carrier(10);
 
     let embedded = websafe_zw::embed_bits(&c, &bits_in).expect("embed ok");
@@ -179,7 +184,11 @@ fn bom_injection_at_line_end_truncates() {
     let bits_out = websafe_zw::extract_bits(&mangled).expect("extract ok");
 
     // Should get only the 8 bits from line 0, then stop at line 1 (BOM breaks it)
-    assert_eq!(bits_out.len(), 8, "extraction should stop at BOM-injected line");
+    assert_eq!(
+        bits_out.len(),
+        8,
+        "extraction should stop at BOM-injected line"
+    );
     assert_eq!(bits_out, &bits_in[..8]);
 }
 
@@ -187,8 +196,10 @@ fn bom_injection_at_line_end_truncates() {
 #[test]
 fn zwj_injection_at_line_end_truncates() {
     // With 8 bits/line, embed 16 bits across 2 lines
-    let bits_in = vec![false, true, false, true, false, true, false, true,
-                       true, false, true, false, true, false, true, false];
+    let bits_in = vec![
+        false, true, false, true, false, true, false, true, true, false, true, false, true, false,
+        true, false,
+    ];
     let c = carrier(10);
 
     let embedded = websafe_zw::embed_bits(&c, &bits_in).expect("embed ok");
@@ -218,21 +229,24 @@ fn truncation_at_unmarked_line_caught_by_crc() {
     let password = b"pw";
     let payload = b"truncation crc test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Remove the ZW marker from line 50 (0-indexed) to simulate
     // a platform that strips ZW from one line in the middle.
     let mut lines: Vec<String> = stego.split('\n').map(String::from).collect();
     if lines.len() > 50 {
-        let cleaned = lines[50].replace(ZW0, "").replace(ZW1, "");
+        let cleaned = lines[50].replace([ZW0, ZW1], "");
         lines[50] = cleaned;
     }
     let mangled = lines.join("\n");
 
     // Extraction gets only 50 bits, then stops. CRC-32 should catch the shortfall.
     let err = snow2::extract(Mode::WebSafeZeroWidth, &mangled, password, None, None);
-    assert!(err.is_err(), "truncation at line 50 must be caught by CRC or length check");
+    assert!(
+        err.is_err(),
+        "truncation at line 50 must be caught by CRC or length check"
+    );
 }
 
 /// Strip the very first line's marker. The entire bitstream offset
@@ -243,12 +257,12 @@ fn strip_first_line_marker_fails() {
     let password = b"pw";
     let payload = b"first line test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     let mut lines: Vec<String> = stego.split('\n').map(String::from).collect();
     // Strip marker from first non-empty line
-    lines[0] = lines[0].replace(ZW0, "").replace(ZW1, "");
+    lines[0] = lines[0].replace([ZW0, ZW1], "");
     let mangled = lines.join("\n");
 
     // First line has no marker → extraction stops immediately → 0 bits → fail
@@ -263,8 +277,8 @@ fn strip_last_embedded_line_marker_fails() {
     let password = b"pw";
     let payload = b"last line test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // With v4 hardened pipeline, all lines get ZW content (real data + random padding).
     // Stripping a padding line won't cause failure because only the first N bytes matter.
@@ -274,7 +288,7 @@ fn strip_last_embedded_line_marker_fails() {
         .iter()
         .position(|l| l.ends_with(ZW0) || l.ends_with(ZW1))
         .expect("should find a marker");
-    lines[first_marker_idx] = lines[first_marker_idx].replace(ZW0, "").replace(ZW1, "");
+    lines[first_marker_idx] = lines[first_marker_idx].replace([ZW0, ZW1], "");
     let mangled = lines.join("\n");
 
     // Corrupting the real-data area → outer AEAD or inner AEAD check fails
@@ -294,8 +308,8 @@ fn telegram_clean_copypaste_roundtrips() {
     let password = b"pw";
     let payload = b"telegram test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Telegram preserves ZW chars — no mangling
     let recovered = snow2::extract(Mode::WebSafeZeroWidth, &stego, password, None, None)
@@ -314,8 +328,8 @@ fn gdocs_soft_hyphen_insertion_roundtrips() {
     let password = b"pw";
     let payload = b"gdocs test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Insert soft hyphens in the middle of some lines (not at end)
     let mangled: String = stego
@@ -349,10 +363,10 @@ fn reddit_markdown_strip_fails() {
     let password = b"pw";
     let payload = b"reddit test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
-    let stripped = stego.replace(ZW0, "").replace(ZW1, "");
+    let stripped = stego.replace([ZW0, ZW1], "");
 
     let err = snow2::extract(Mode::WebSafeZeroWidth, &stripped, password, None, None);
     assert!(err.is_err(), "reddit full strip must fail");
@@ -367,8 +381,8 @@ fn email_trailing_space_after_marker_fails() {
     let password = b"pw";
     let payload = b"email test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Append a trailing space to every line (common email format=flowed)
     let mangled: String = stego
@@ -379,7 +393,10 @@ fn email_trailing_space_after_marker_fails() {
 
     // Last char on every line is now ' ' instead of ZW0/ZW1 → stops immediately
     let err = snow2::extract(Mode::WebSafeZeroWidth, &mangled, password, None, None);
-    assert!(err.is_err(), "trailing spaces after markers must break extraction");
+    assert!(
+        err.is_err(),
+        "trailing spaces after markers must break extraction"
+    );
 }
 
 /// Older terminal: may strip all non-ASCII characters.
@@ -389,8 +406,8 @@ fn terminal_ascii_only_strip_fails() {
     let password = b"pw";
     let payload = b"terminal test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Strip everything non-ASCII
     let ascii_only: String = stego.chars().filter(|c| c.is_ascii()).collect();
@@ -485,8 +502,8 @@ fn single_bitflip_caught() {
     let password = b"pw";
     let payload = b"bitflip test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     let mut lines: Vec<String> = stego.split('\n').map(String::from).collect();
     // Flip the marker on line 10
@@ -510,12 +527,14 @@ fn full_inversion_caught() {
     let password = b"pw";
     let payload = b"inversion test";
 
-    let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
-        .expect("embed ok");
+    let stego =
+        snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None).expect("embed ok");
 
     // Invert: swap ZW0 and ZW1 globally
     let tmp = stego.replace(ZW0, "\x01"); // temp placeholder
-    let inv = tmp.replace(ZW1, &ZW0.to_string()).replace('\x01', &ZW1.to_string());
+    let inv = tmp
+        .replace(ZW1, &ZW0.to_string())
+        .replace('\x01', &ZW1.to_string());
 
     let err = snow2::extract(Mode::WebSafeZeroWidth, &inv, password, None, None);
     assert!(err.is_err(), "full inversion must be caught");

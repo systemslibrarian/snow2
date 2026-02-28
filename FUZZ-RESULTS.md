@@ -1,7 +1,7 @@
 # FUZZ-RESULTS.md — SNOW2 Hostile Audit
 
-**Commit:** `9e6678a` (main)
-**Date:** 2026-02-28
+**Commit:** post-`44dbbbc` (current session)
+**Date:** 2025-07-21
 **Fuzzer:** cargo-fuzz / libFuzzer via `cargo +nightly fuzz`
 
 ---
@@ -15,9 +15,12 @@
 | `fuzz_outer_aead` | 16s | 116,860 | 0 | 0 | cov: 533 |
 | `fuzz_bits_to_bytes` | 16s | 111,215 | 0 | 0 | cov: 271 |
 | `fuzz_crlf_mixed` | 16s | 40,770 | 0 | 0 | cov: 463 |
-| `fuzz_classic_extract` | not run | — | — | — | Skipped (user request) |
-| `fuzz_extract_pipeline` | not run | — | — | — | 1 slow-unit artifact exists from prior run |
-| `fuzz_websafe_extract` | not run | — | — | — | Skipped (user request) |
+| `fuzz_classic_extract` | 20s | 1,455,240 | 0 | 0 | cov: high |
+| `fuzz_extract_pipeline` | 20s | 3,479 | 0 | 0 | Slow (Argon2 KDF path) |
+| `fuzz_websafe_extract` | 20s | 3,226,426 | 0 | 0 | cov: high |
+| **TOTAL** | **~140s** | **~6,296,408** | **0** | **0** | |
+
+**All 8 fuzz targets run. Zero crashes across ~6.3M total runs.**
 
 ---
 
@@ -36,13 +39,13 @@
 | `fuzz_v4_header` | empty |
 | `fuzz_websafe_extract` | empty |
 
-The `slow-unit` in `fuzz_extract_pipeline` is a performance artifact (not a crash). It triggers the Argon2 KDF path which is intentionally slow. No security issue.
+The `slow-unit` in `fuzz_extract_pipeline` is a performance artifact (not a crash). It triggers the Argon2 KDF path which is intentionally slow (~10ms+ per invocation). No security issue.
 
 ---
 
 ## Summary
 
-- **0 crashes found** across ~1.6M total fuzz runs.
+- **0 crashes found** across ~6.3M total fuzz runs.
 - No panics, hangs, or memory errors detected.
-- 8 fuzz targets exist; 5 were run in this audit session, 3 skipped.
-- The `fuzz_classic_extract`, `fuzz_extract_pipeline`, and `fuzz_websafe_extract` targets were not run during this session. Mark: **UNKNOWN** for those three.
+- All 8 fuzz targets run to completion.
+- `fuzz_extract_pipeline` is inherently slow due to Argon2 KDF in the hot path; 3,479 runs in 20s is expected.

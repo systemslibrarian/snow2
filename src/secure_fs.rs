@@ -44,12 +44,12 @@ pub fn write_secure(path: &str, data: &[u8], sensitive: bool) -> Result<()> {
     if sensitive {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
             use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
-                .create_new(true)    // fail if already exists — prevents race
-                .mode(0o600)         // owner read/write only from creation
+                .create_new(true) // fail if already exists — prevents race
+                .mode(0o600) // owner read/write only from creation
                 .open(&temp)
                 .with_context(|| format!("create temp file (sensitive): {}", temp))?;
             if let Err(e) = file.write_all(data) {
@@ -59,14 +59,13 @@ pub fn write_secure(path: &str, data: &[u8], sensitive: bool) -> Result<()> {
         }
         #[cfg(not(unix))]
         {
-            std::fs::write(&temp, data)
-                .with_context(|| format!("write temp file: {}", temp))?;
+            std::fs::write(&temp, data).with_context(|| format!("write temp file: {}", temp))?;
         }
     } else {
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
-            .create_new(true)    // fail if already exists — prevents race
+            .create_new(true) // fail if already exists — prevents race
             .open(&temp)
             .with_context(|| format!("create temp file: {}", temp))?;
         if let Err(e) = file.write_all(data) {
@@ -116,8 +115,7 @@ pub fn secure_delete(path: &str, passes: usize) -> Result<()> {
     let size = metadata.len() as usize;
 
     if size == 0 {
-        std::fs::remove_file(path)
-            .with_context(|| format!("remove empty file: {}", path))?;
+        std::fs::remove_file(path).with_context(|| format!("remove empty file: {}", path))?;
         return Ok(());
     }
 
@@ -125,13 +123,13 @@ pub fn secure_delete(path: &str, passes: usize) -> Result<()> {
     let patterns: &[u8] = &[0x00, 0xFF, 0xAA, 0x55, 0x00];
     let effective_passes = passes.min(patterns.len());
 
-    for pass in 0..effective_passes {
+    for (pass, &pattern) in patterns[..effective_passes].iter().enumerate() {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .open(path)
             .with_context(|| format!("open file for overwrite pass {}: {}", pass, path))?;
 
-        let buf = vec![patterns[pass]; size];
+        let buf = vec![pattern; size];
         file.write_all(&buf)
             .with_context(|| format!("overwrite pass {}: {}", pass, path))?;
         file.sync_all()

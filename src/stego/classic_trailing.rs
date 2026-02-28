@@ -22,7 +22,10 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
 
     // Count how many lines are usable (we allow empty lines too, but empty lines are fragile;
     // for v0.1 we require non-empty lines to reduce accidental loss).
-    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
+    let usable = lines
+        .iter()
+        .filter(|l| !l.trim_end_matches('\r').is_empty())
+        .count();
 
     if bits.len() > usable {
         bail!(
@@ -38,8 +41,8 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
     for line in lines.drain(..) {
         // Separate any trailing \r from the line content so we can
         // preserve CRLF endings: content + marker + \r (if CRLF).
-        let (content, cr) = if line.ends_with('\r') {
-            (&line[..line.len() - 1], "\r")
+        let (content, cr) = if let Some(stripped) = line.strip_suffix('\r') {
+            (stripped, "\r")
         } else {
             (line, "")
         };
@@ -113,7 +116,10 @@ pub fn extract_bits(carrier_text: &str) -> Result<Vec<bool>> {
 /// Defeats detection based on which lines have trailing whitespace.
 pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Result<String> {
     let lines: Vec<&str> = carrier_text.split('\n').collect();
-    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
+    let usable = lines
+        .iter()
+        .filter(|l| !l.trim_end_matches('\r').is_empty())
+        .count();
 
     if bits.len() > usable {
         anyhow::bail!(
@@ -134,8 +140,8 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
 
     for line in &lines {
         // Separate any trailing \r for CRLF preservation.
-        let (content, cr) = if line.ends_with('\r') {
-            (&line[..line.len() - 1], "\r")
+        let (content, cr) = if let Some(stripped) = line.strip_suffix('\r') {
+            (stripped, "\r")
         } else {
             (*line, "")
         };
@@ -195,5 +201,8 @@ pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
 
 /// Count the number of usable (non-empty) lines in the carrier.
 pub fn usable_lines(carrier_text: &str) -> usize {
-    carrier_text.split('\n').filter(|l| !l.trim_end_matches('\r').is_empty()).count()
+    carrier_text
+        .split('\n')
+        .filter(|l| !l.trim_end_matches('\r').is_empty())
+        .count()
 }

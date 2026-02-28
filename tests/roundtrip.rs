@@ -11,23 +11,11 @@ fn roundtrip_classic_trailing_message() {
     let pepper = Some(b"signal key" as &[u8]);
     let payload = b"hello snow2";
 
-    let out_carrier = snow2::embed(
-        Mode::ClassicTrailing,
-        &carrier,
-        payload,
-        password,
-        pepper,
-    )
-    .expect("embed should succeed");
+    let out_carrier = snow2::embed(Mode::ClassicTrailing, &carrier, payload, password, pepper)
+        .expect("embed should succeed");
 
-    let recovered = snow2::extract(
-        Mode::ClassicTrailing,
-        &out_carrier,
-        password,
-        pepper,
-        None,
-    )
-    .expect("extract should succeed");
+    let recovered = snow2::extract(Mode::ClassicTrailing, &out_carrier, password, pepper, None)
+        .expect("extract should succeed");
 
     assert_eq!(&*recovered, payload);
 }
@@ -43,23 +31,11 @@ fn roundtrip_websafe_zw_message() {
     let pepper: Option<&[u8]> = None;
     let payload = b"hello zw";
 
-    let out_carrier = snow2::embed(
-        Mode::WebSafeZeroWidth,
-        &carrier,
-        payload,
-        password,
-        pepper,
-    )
-    .expect("embed should succeed");
+    let out_carrier = snow2::embed(Mode::WebSafeZeroWidth, &carrier, payload, password, pepper)
+        .expect("embed should succeed");
 
-    let recovered = snow2::extract(
-        Mode::WebSafeZeroWidth,
-        &out_carrier,
-        password,
-        pepper,
-        None,
-    )
-    .expect("extract should succeed");
+    let recovered = snow2::extract(Mode::WebSafeZeroWidth, &out_carrier, password, pepper, None)
+        .expect("extract should succeed");
 
     assert_eq!(&*recovered, payload);
 }

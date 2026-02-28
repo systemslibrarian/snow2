@@ -1,3 +1,4 @@
+use crate::secure_mem::SecureVec;
 use anyhow::{anyhow, bail, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
@@ -5,9 +6,8 @@ use chacha20poly1305::{
     Key, XChaCha20Poly1305, XNonce,
 };
 use hkdf::Hkdf;
-use sha2::Sha256;
-use crate::secure_mem::SecureVec;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
 /// A key that will be zeroized on drop.
@@ -227,9 +227,7 @@ pub fn derive_key_pair(
 /// extraction pipeline decrypt the outer layer without knowing the pepper,
 /// inspect the container's `pepper_required` flag, and produce a clear
 /// error message when the pepper is missing.
-pub fn derive_outer_key_from_master(
-    master: &Zeroizing<[u8; 32]>,
-) -> Result<ZeroizingKey> {
+pub fn derive_outer_key_from_master(master: &Zeroizing<[u8; 32]>) -> Result<ZeroizingKey> {
     hkdf_expand_key(master, None, HKDF_LABEL_OUTER_KEY)
 }
 
@@ -326,7 +324,13 @@ pub fn aead_seal(
     let n = XNonce::from_slice(nonce);
 
     let ct = cipher
-        .encrypt(n, Payload { msg: plaintext, aad })
+        .encrypt(
+            n,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|e| anyhow!("AEAD encrypt failed: {:?}", e))?;
 
     Ok(ct)
@@ -347,7 +351,13 @@ pub fn aead_open(
     let n = XNonce::from_slice(nonce);
 
     let mut pt = cipher
-        .decrypt(n, Payload { msg: ciphertext, aad })
+        .decrypt(
+            n,
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
         .map_err(|e| {
             anyhow!(
                 "AEAD decrypt/auth failed (wrong key, wrong pepper, or modified carrier): {:?}",
@@ -401,7 +411,13 @@ pub fn outer_seal(
     let n = XNonce::from_slice(&nonce_bytes);
 
     let ct = cipher
-        .encrypt(n, Payload { msg: plaintext, aad: b"" })
+        .encrypt(
+            n,
+            Payload {
+                msg: plaintext,
+                aad: b"",
+            },
+        )
         .map_err(|e| anyhow!("Outer AEAD encrypt failed: {:?}", e))?;
 
     let mut out = Vec::with_capacity(16 + 24 + ct.len());
@@ -424,7 +440,13 @@ pub fn outer_seal_with_key(
     let n = XNonce::from_slice(&nonce_bytes);
 
     let ct = cipher
-        .encrypt(n, Payload { msg: plaintext, aad: b"" })
+        .encrypt(
+            n,
+            Payload {
+                msg: plaintext,
+                aad: b"",
+            },
+        )
         .map_err(|e| anyhow!("Outer AEAD encrypt failed: {:?}", e))?;
 
     let mut out = Vec::with_capacity(16 + 24 + ct.len());
@@ -439,7 +461,11 @@ pub fn outer_seal_with_key(
 /// Returns plaintext on success, error on failure (wrong password or corruption).
 pub fn outer_open(outer_key: &ZeroizingKey, blob: &[u8]) -> Result<Vec<u8>> {
     if blob.len() < OUTER_OVERHEAD {
-        bail!("Outer blob too short ({} bytes, need at least {}).", blob.len(), OUTER_OVERHEAD);
+        bail!(
+            "Outer blob too short ({} bytes, need at least {}).",
+            blob.len(),
+            OUTER_OVERHEAD
+        );
     }
     // salt is bytes [0..16] — already used by caller to derive the key
     let nonce = &blob[16..40];
@@ -450,9 +476,7 @@ pub fn outer_open(outer_key: &ZeroizingKey, blob: &[u8]) -> Result<Vec<u8>> {
 
     let pt = cipher
         .decrypt(n, Payload { msg: ct, aad: b"" })
-        .map_err(|_| {
-            anyhow!("Outer decryption failed (wrong password or no hidden message).")
-        })?;
+        .map_err(|_| anyhow!("Outer decryption failed (wrong password or no hidden message)."))?;
 
     Ok(pt)
 }

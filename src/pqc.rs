@@ -11,12 +11,10 @@ use pqcrypto_dilithium::dilithium5;
 use pqcrypto_kyber::kyber1024;
 use pqcrypto_traits::{
     kem::{
-        Ciphertext as KemCiphertext, PublicKey as KemPublicKey,
-        SecretKey as KemSecretKey, SharedSecret as KemSharedSecret,
+        Ciphertext as KemCiphertext, PublicKey as KemPublicKey, SecretKey as KemSecretKey,
+        SharedSecret as KemSharedSecret,
     },
-    sign::{
-        DetachedSignature, PublicKey as SignPublicKey, SecretKey as SignSecretKey,
-    },
+    sign::{DetachedSignature, PublicKey as SignPublicKey, SecretKey as SignSecretKey},
 };
 use sha2::Sha256;
 
@@ -151,8 +149,7 @@ impl PqSecretKey {
         let mut aad = Vec::with_capacity(9);
         aad.extend_from_slice(ENCRYPTED_SK_MAGIC);
         aad.push(ENCRYPTED_SK_VERSION);
-        let ciphertext =
-            crate::crypto::aead_seal(&key, &nonce, &aad, &plaintext)?;
+        let ciphertext = crate::crypto::aead_seal(&key, &nonce, &aad, &plaintext)?;
         // Zeroize the plaintext secret key bytes immediately after encryption.
         plaintext.zeroize();
 
@@ -202,8 +199,7 @@ impl PqSecretKey {
         let kdf = crate::crypto::KdfParams::recommended();
         let key = crate::crypto::derive_key(password, None, salt, &kdf)?;
 
-        let plaintext =
-            crate::crypto::aead_open(&key, nonce, &aad, ciphertext)?;
+        let plaintext = crate::crypto::aead_open(&key, nonce, &aad, ciphertext)?;
 
         Self::from_bytes(&plaintext)
     }
@@ -314,4 +310,3 @@ pub fn verify(message: &[u8], signature_bytes: &[u8], pk: &DilithiumPublicKey) -
     dilithium5::verify_detached_signature(&signature, message, pk)
         .map_err(|_| anyhow!("Dilithium verification failed"))
 }
-

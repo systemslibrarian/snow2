@@ -47,10 +47,12 @@ pub fn raw_bits_to_bytes(bits: &[bool]) -> Vec<u8> {
 /// The CRC-32 catches corruption in the steganographic layer (e.g. whitespace
 /// stripping, copy-paste mangling) before the container parser or AEAD sees it.
 pub fn bytes_to_bits(bytes: &[u8]) -> Result<Vec<bool>> {
-    let len: u32 = bytes
-        .len()
-        .try_into()
-        .map_err(|_| anyhow!("Payload too large for bitstream framing (max {} bytes).", u32::MAX))?;
+    let len: u32 = bytes.len().try_into().map_err(|_| {
+        anyhow!(
+            "Payload too large for bitstream framing (max {} bytes).",
+            u32::MAX
+        )
+    })?;
 
     // CRC-32 over the raw data payload
     let crc = crc32fast::hash(bytes);
@@ -111,9 +113,7 @@ pub fn bits_to_bytes(bits: &[bool]) -> Result<Vec<u8>> {
     let total_bytes = header_bytes
         .checked_add(data_len)
         .context("length overflow")?;
-    let total_bits = total_bytes
-        .checked_mul(8)
-        .context("bit length overflow")?;
+    let total_bits = total_bytes.checked_mul(8).context("bit length overflow")?;
 
     if bits.len() < total_bits {
         bail!(

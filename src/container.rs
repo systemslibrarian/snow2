@@ -10,13 +10,14 @@ use crate::secure_mem::SecureVec;
 use crate::Mode;
 use subtle::ConstantTimeEq;
 
-use flate2::write::{DeflateEncoder, DeflateDecoder};
+use flate2::write::{DeflateDecoder, DeflateEncoder};
 use flate2::Compression;
 use std::io::Write;
 
 #[cfg(feature = "pqc")]
-use pqcrypto_traits::{sign::DetachedSignature, kem::PublicKey as KemPublicKey, sign::PublicKey as SignPublicKey};
-
+use pqcrypto_traits::{
+    kem::PublicKey as KemPublicKey, sign::DetachedSignature, sign::PublicKey as SignPublicKey,
+};
 
 const MAGIC: &[u8; 5] = b"SNOW2";
 const VERSION: u8 = 1;
@@ -67,8 +68,12 @@ const V4_HDR_LEN: usize = 49;
 /// Bucket = inner_len rounded up to the next multiple of 64.
 /// Minimum bucket = 64.
 pub fn pad_bucket(inner_len: usize) -> usize {
-    let b = ((inner_len + 63) / 64) * 64;
-    if b < 64 { 64 } else { b }
+    let b = inner_len.div_ceil(64) * 64;
+    if b < 64 {
+        64
+    } else {
+        b
+    }
 }
 
 /// Versioned container header.
@@ -218,10 +223,16 @@ impl Snow2Container {
         opts.kdf.validate_extraction_bounds()?;
 
         if opts.kdf.p_cost > 255 {
-            bail!("p_cost {} exceeds compact header max (255).", opts.kdf.p_cost);
+            bail!(
+                "p_cost {} exceeds compact header max (255).",
+                opts.kdf.p_cost
+            );
         }
         if opts.kdf.out_len > 255 {
-            bail!("out_len {} exceeds compact header max (255).", opts.kdf.out_len);
+            bail!(
+                "out_len {} exceeds compact header max (255).",
+                opts.kdf.out_len
+            );
         }
 
         let salt = crypto::random_bytes(16)?;
@@ -333,8 +344,7 @@ impl Snow2Container {
         };
         let flags: u8 = (if opts.pepper_required { 1 } else { 0 })
             | (if compressed_flag { 1 << 1 } else { 0 })
-            | (mode_bits << 2)
-            | (0u8 << 4); // aead = XChaCha20-Poly1305
+            | (mode_bits << 2); // aead = XChaCha20-Poly1305
 
         let mut bin_hdr = Vec::with_capacity(V4_HDR_LEN);
         bin_hdr.push(flags);
@@ -379,12 +389,12 @@ impl Snow2Container {
     }
 
     #[cfg(feature = "pqc")]
-    fn seal_pqc(
-        plaintext: &[u8],
-        mode: Mode,
-        opts: &EmbedOptions,
-    ) -> Result<Self> {
-        let pq_pk = opts.pqc_keys.pk.as_ref().context("PQC public key is required for PQC seal.")?;
+    fn seal_pqc(plaintext: &[u8], mode: Mode, opts: &EmbedOptions) -> Result<Self> {
+        let pq_pk = opts
+            .pqc_keys
+            .pk
+            .as_ref()
+            .context("PQC public key is required for PQC seal.")?;
 
         let header = Snow2Header {
             magic: String::from_utf8(MAGIC.to_vec()).expect("MAGIC is valid utf8"),
@@ -412,7 +422,11 @@ impl Snow2Container {
         ciphertext.extend_from_slice(&classic_ct);
 
         // Sign the whole thing
-        let pq_sk = opts.pqc_keys.sk.as_ref().context("PQC secret key is required for PQC seal.")?;
+        let pq_sk = opts
+            .pqc_keys
+            .sk
+            .as_ref()
+            .context("PQC secret key is required for PQC seal.")?;
         let signature = crate::pqc::sign(&ciphertext, &pq_sk.dilithium_sk);
 
         Ok(Self {
@@ -444,7 +458,8 @@ impl Snow2Container {
                 Ok(aad[13..29].to_vec())
             }
         } else {
-            STANDARD.decode(&self.header.salt_b64)
+            STANDARD
+                .decode(&self.header.salt_b64)
                 .map_err(|e| anyhow::anyhow!("decode salt_b64: {e}"))
         }
     }
@@ -542,7 +557,9 @@ impl Snow2Container {
 
     /// Open a compact (v3) container using the stored binary header as AAD.
     fn open_compact(&self, password: &[u8], pepper: Option<&[u8]>) -> Result<SecureVec> {
-        let aad = self.raw_header_aad.as_ref()
+        let aad = self
+            .raw_header_aad
+            .as_ref()
             .context("v3 container is missing raw binary header AAD")?;
 
         if self.header.pepper_required && pepper.is_none() {
@@ -573,7 +590,9 @@ impl Snow2Container {
     ///
     /// Decompresses plaintext if the compressed flag is set.
     fn open_v4(&self, password: &[u8], pepper: Option<&[u8]>) -> Result<SecureVec> {
-        let aad = self.raw_header_aad.as_ref()
+        let aad = self
+            .raw_header_aad
+            .as_ref()
             .context("v4 container is missing raw binary header AAD")?;
 
         let flags = aad[0];
@@ -595,12 +614,13 @@ impl Snow2Container {
         // Decompress if plaintext was compressed
         let plaintext = if compressed {
             let mut decoder = DeflateDecoder::new(Vec::new());
-            decoder.write_all(&decrypted)
+            decoder
+                .write_all(&decrypted)
                 .context("deflate decompress failed")?;
-            let raw = decoder.finish()
+            let raw = decoder
+                .finish()
                 .context("deflate decompress finish failed")?;
-            SecureVec::from_slice(&raw)
-                .context("SecureVec creation failed")?
+            SecureVec::from_slice(&raw).context("SecureVec creation failed")?
         } else {
             decrypted
         };
@@ -621,7 +641,9 @@ impl Snow2Container {
     /// Used by the extraction pipeline where the master secret was already
     /// derived via Argon2.  Avoids a redundant Argon2 run.
     pub fn open_with_key(&self, inner_key: &crypto::ZeroizingKey) -> Result<SecureVec> {
-        let aad = self.raw_header_aad.as_ref()
+        let aad = self
+            .raw_header_aad
+            .as_ref()
             .context("v4 container is missing raw binary header AAD")?;
 
         let flags = aad[0];
@@ -638,12 +660,13 @@ impl Snow2Container {
 
         let plaintext = if compressed {
             let mut decoder = DeflateDecoder::new(Vec::new());
-            decoder.write_all(&decrypted)
+            decoder
+                .write_all(&decrypted)
                 .context("deflate decompress failed")?;
-            let raw = decoder.finish()
+            let raw = decoder
+                .finish()
                 .context("deflate decompress finish failed")?;
-            SecureVec::from_slice(&raw)
-                .context("SecureVec creation failed")?
+            SecureVec::from_slice(&raw).context("SecureVec creation failed")?
         } else {
             decrypted
         };
@@ -661,7 +684,7 @@ impl Snow2Container {
 
     #[cfg(feature = "pqc")]
     fn open_pqc(&self, sk_bytes: &[u8]) -> Result<SecureVec> {
-        use crate::pqc::{PqSecretKey};
+        use crate::pqc::PqSecretKey;
 
         let sig = self
             .pqc_signature
@@ -676,8 +699,7 @@ impl Snow2Container {
         let dilithium_pk_bytes = STANDARD
             .decode(dilithium_pk_b64)
             .context("Failed to decode Dilithium public key")?;
-        let dilithium_pk =
-            crate::pqc::DilithiumPublicKey::from_bytes(&dilithium_pk_bytes)?;
+        let dilithium_pk = crate::pqc::DilithiumPublicKey::from_bytes(&dilithium_pk_bytes)?;
 
         // Verify signature over the ciphertext first
         crate::pqc::verify(&self.ciphertext, sig, &dilithium_pk)?;
@@ -723,7 +745,9 @@ impl Snow2Container {
         // v4 hardened: stripped wire format (no MAGIC, no header_len)
         // [version(1)][header(49)][ciphertext]
         if self.header.version == VERSION_HARDENED {
-            let bin_hdr = self.raw_header_aad.as_ref()
+            let bin_hdr = self
+                .raw_header_aad
+                .as_ref()
                 .context("v4 container missing raw_header_aad")?;
             let mut out = Vec::with_capacity(1 + bin_hdr.len() + self.ciphertext.len());
             out.push(VERSION_HARDENED);
@@ -734,7 +758,9 @@ impl Snow2Container {
 
         // Compact binary header (v3)
         if self.header.version == VERSION_COMPACT {
-            let bin_hdr = self.raw_header_aad.as_ref()
+            let bin_hdr = self
+                .raw_header_aad
+                .as_ref()
                 .context("v3 container missing raw_header_aad")?;
             let hdr_len = bin_hdr.len() as u32;
             let mut out = Vec::with_capacity(5 + 1 + 4 + bin_hdr.len() + self.ciphertext.len());
@@ -748,16 +774,20 @@ impl Snow2Container {
 
         // JSON header (v1 / v2)
         let header_json = serde_json::to_vec(&self.header).context("serialize header")?;
-        let header_len: u32 = header_json
-            .len()
-            .try_into()
-            .context("header too large")?;
+        let header_len: u32 = header_json.len().try_into().context("header too large")?;
 
         let _sig_overhead = {
             #[cfg(feature = "pqc")]
-            { self.pqc_signature.as_ref().map(|s| s.len() + 2).unwrap_or(0) }
+            {
+                self.pqc_signature
+                    .as_ref()
+                    .map(|s| s.len() + 2)
+                    .unwrap_or(0)
+            }
             #[cfg(not(feature = "pqc"))]
-            { 0usize }
+            {
+                0usize
+            }
         };
         let mut out = Vec::with_capacity(
             5 + 1 + 4 + header_json.len() + self.ciphertext.len() + _sig_overhead,
@@ -799,11 +829,8 @@ impl Snow2Container {
             );
         }
 
-        let header_len = u32::from_le_bytes(
-            input[6..10]
-                .try_into()
-                .expect("slice length checked"),
-        ) as usize;
+        let header_len =
+            u32::from_le_bytes(input[6..10].try_into().expect("slice length checked")) as usize;
 
         // SECURITY: Cap header length to prevent absurdly large
         // allocations from a malicious container. 64 KiB is far more
