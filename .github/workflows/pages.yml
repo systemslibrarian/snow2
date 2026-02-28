@@ -31,6 +31,14 @@ jobs:
       - name: Build WASM
         run: wasm-pack build snow2_wasm --target web --out-dir ../web_demo/pkg
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run WASM tests
+        run: node web_demo/test_wasm.mjs
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

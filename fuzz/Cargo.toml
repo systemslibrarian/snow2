@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+zeroize = { version = "1.7", features = ["alloc"] }
 
 [dependencies.snow2]
 path = ".."
@@ -48,6 +49,27 @@ bench = false
 [[bin]]
 name = "fuzz_extract_pipeline"
 path = "fuzz_targets/fuzz_extract_pipeline.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_v4_header"
+path = "fuzz_targets/fuzz_v4_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_crlf_mixed"
+path = "fuzz_targets/fuzz_crlf_mixed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_outer_aead"
+path = "fuzz_targets/fuzz_outer_aead.rs"
 test = false
 doc = false
 bench = false

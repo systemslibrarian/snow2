@@ -81,8 +81,7 @@ impl PqPublicKey {
 ///
 /// Format (v1): `[SNOW2EK\0 (8)][version (1)][salt (16)][nonce (24)][AEAD ciphertext]`
 ///
-/// Legacy (v0): `[SNOW2EK\0 (8)][salt (16)][nonce (24)][AEAD ciphertext]`
-/// (no version byte — salt starts immediately after magic)
+/// Legacy v0 (no version byte) is NOT supported.  Only v1 is accepted.
 const ENCRYPTED_SK_MAGIC: &[u8; 8] = b"SNOW2EK\0";
 
 /// Current encrypted-SK format version.
@@ -166,9 +165,7 @@ impl PqSecretKey {
         Ok(out)
     }
 
-    /// Decrypt an encrypted secret key file.
-    ///
-    /// Supports both v1 (versioned) and legacy v0 (un-versioned) formats.
+    /// Decrypt an encrypted secret key file (v1 format only).
     pub fn decrypt(encrypted: &[u8], password: &[u8]) -> Result<Self> {
         if encrypted.len() < 8 + 1 + 16 + 24 {
             return Err(anyhow!("Encrypted key file too short."));

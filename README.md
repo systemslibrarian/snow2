@@ -23,7 +23,7 @@ SNOW2 keeps that same spirit:
 - Educational
 - Respectful of the original design
 
-But cryptographically modern and safer by default.
+But cryptographically modern.
 
 ---
 
@@ -95,14 +95,14 @@ This is useful when you want "password + something else you know" by policy.
 - On WASM targets, falls back to zeroize-on-drop Vec wrappers (no mlock available)
 
 ### Bitstream Integrity
-- **V4 containers**: Outer AEAD (XChaCha20-Poly1305 with BLAKE3-derived key) provides cryptographic integrity over the entire embedded bitstream — no CRC framing needed
+- **V4 containers**: Outer AEAD (XChaCha20-Poly1305 with Argon2-derived key) provides cryptographic integrity over the entire embedded bitstream — no CRC framing needed
 - **Legacy containers (v1/v3)**: CRC-32 framing catches carrier corruption (whitespace stripping, copy-paste mangling) before the container parser or AEAD sees it
 
 ### Steganalysis Resistance (V4 Hardened Pipeline)
 SNOW2 v4 implements six layers of steg resistance that make embedded data virtually undetectable:
 
 1. **Random carrier padding** — every non-empty line in the carrier gets steganographic content (real data OR random padding), eliminating the statistical boundary between "message lines" and "clean lines"
-2. **Outer AEAD encryption** — the entire embedded bitstream is encrypted with a BLAKE3-derived key + XChaCha20-Poly1305, making it indistinguishable from uniform random noise
+2. **Outer AEAD encryption** — the entire embedded bitstream is encrypted with an Argon2-derived key + XChaCha20-Poly1305, making it indistinguishable from uniform random noise
 3. **Constant-size containers** — payloads are padded to fixed-size buckets (multiples of 64 bytes), masking the actual message length
 4. **Plaintext compression** — deflate compression before encryption reduces the data footprint
 5. **Stripped wire format** — no magic bytes or header length on the wire (saves 9 bytes, removes ASCII signatures)
@@ -286,6 +286,33 @@ snow2 shred --path sensitive.txt --passes 3
 
 > **Note:** File shredding is best-effort. On SSDs with wear-leveling, CoW filesystems (btrfs, ZFS), or journaling filesystems, overwritten data may persist in spare blocks, snapshots, or journals. For high-assurance deletion, use full-disk encryption and destroy the key.
 
+### Quick-Reference Cheat Sheet
+
+```bash
+# Embed (websafe-zw, recommended)
+snow2 embed -m websafe-zw -c carrier.txt -o out.txt --message "secret" --password "pw"
+
+# Embed from file
+snow2 embed -m websafe-zw -c carrier.txt -o out.txt --input secret.bin --password "pw"
+
+# Embed with pepper + policy
+snow2 embed -m websafe-zw -c carrier.txt -o out.txt --message "secret" \
+  --password "pw" --pepper "signal" --pepper-required
+
+# Extract
+snow2 extract -m websafe-zw -c out.txt -o recovered.bin --password "pw"
+
+# Extract with pepper
+snow2 extract -m websafe-zw -c out.txt -o recovered.bin --password "pw" --pepper "signal"
+
+# Scan carrier for capacity & risks
+snow2 scan --carrier carrier.txt
+
+# Classic-trailing mode
+snow2 embed -m classic-trailing -c carrier.txt -o out.txt --message "secret" --password "pw"
+snow2 extract -m classic-trailing -c out.txt -o recovered.bin --password "pw"
+```
+
 ---
 
 ## Security Options (CLI)
@@ -381,7 +408,7 @@ The header is authenticated as AEAD additional data (AAD). Plaintext is optional
 The v4 embed pipeline wraps this further:
 ```
 container → [real_len u32 LE (4)][container][random_padding] → constant-size bucket
-→ outer AEAD (BLAKE3-derived key + XChaCha20-Poly1305) → raw bits → embed + random-fill ALL lines
+→ outer AEAD (Argon2-derived key + XChaCha20-Poly1305) → raw bits → embed + random-fill ALL lines
 ```
 
 ### Version 1 (legacy classic)
@@ -418,7 +445,7 @@ Version byte is authenticated as AEAD AAD alongside the magic, preventing downgr
 
 ### Backward Compatibility
 
-Extraction automatically detects the container version. V4 outer decryption is tried first (fast — BLAKE3 + AEAD); if it fails, the legacy CRC-framed path handles v1/v3 containers.
+Extraction automatically detects the container version. V4 outer decryption is tried first; if it fails, the legacy CRC-framed path handles v1/v3 containers.
 
 ---
 
@@ -497,7 +524,7 @@ Features:
 - Configurable Argon2id KDF parameters
 - Pepper / Signal Key support with optional pepper-required policy
 - Carrier generation and download
-- Extract with UTF-8 preview and raw binary download
+- Extract with UTF-8 preview and raw base64 data
 
 ### Build the WASM package
 ```bash
@@ -528,7 +555,7 @@ The original SNOW (by Matthew Kwan, late 1990s) was a C program that:
 
 SNOW2 preserves the spirit but is a complete rewrite:
 - **Language**: Rust (memory-safe, no buffer overflows)
-- **Encryption**: Dual-layer AEAD — inner XChaCha20-Poly1305 (Argon2id key) + outer XChaCha20-Poly1305 (BLAKE3 key)
+- **Encryption**: Dual-layer AEAD — inner XChaCha20-Poly1305 (Argon2id key + pepper) + outer XChaCha20-Poly1305 (Argon2id key, password-only)
 - **Key derivation**: Argon2id + HKDF-SHA256 (memory-hard, domain-separated)
 - **Integrity**: Dual AEAD authentication (outer + inner), legacy CRC-32 for old containers
 - **Steg resistance**: Constant-size padding, random carrier fill, outer encryption makes bitstream indistinguishable from uniform random (chi-squared ≈ 255)
@@ -553,7 +580,7 @@ src/
   lib.rs              Library API (embed / extract / embed_with_options)
   config.rs           EmbedOptions, EmbedSecurityOptions, PqKeys
   container.rs        SNOW2 container format v1/v3/v4 (seal / open / serialize / parse)
-  crypto.rs           AEAD, KDF (Argon2id + HKDF), outer encryption (BLAKE3 + AEAD), random bytes
+  crypto.rs           AEAD, KDF (Argon2id + HKDF), outer encryption, random bytes
   secure_mem.rs       SecureVec (mlock + guard pages on native, zeroize on WASM)
   secure_fs.rs        Atomic writes, permission hardening, best-effort shredding
   pqc.rs              Post-quantum crypto: Kyber1024 + Dilithium5 [optional]

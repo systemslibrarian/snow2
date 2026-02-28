@@ -29,7 +29,7 @@ const BITS_PER_LINE: usize = 8;
 
 pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
     let mut lines: Vec<&str> = carrier_text.split('\n').collect();
-    let usable = lines.iter().filter(|l| !l.is_empty()).count();
+    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
 
     // How many lines do we need?
     let lines_needed = (bits.len() + BITS_PER_LINE - 1) / BITS_PER_LINE;
@@ -49,9 +49,16 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
 
     for line in lines.drain(..) {
-        if bit_idx < bits.len() && !line.is_empty() {
+        // Separate any trailing \r for CRLF preservation.
+        let (content, cr) = if line.ends_with('\r') {
+            (&line[..line.len() - 1], "\r")
+        } else {
+            (line, "")
+        };
+
+        if bit_idx < bits.len() && !content.is_empty() {
             // Remove any existing trailing zero-width markers to avoid ambiguity.
-            let cleaned = strip_trailing_zw(line);
+            let cleaned = strip_trailing_zw(content);
 
             // Append up to BITS_PER_LINE ZW chars for this line.
             let mut suffix = String::new();
@@ -61,7 +68,7 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
                     bit_idx += 1;
                 }
             }
-            out_lines.push(format!("{cleaned}{suffix}"));
+            out_lines.push(format!("{cleaned}{suffix}{cr}"));
         } else {
             out_lines.push(line.to_string());
         }
@@ -74,6 +81,9 @@ pub fn extract_bits(carrier_text: &str) -> Result<Vec<bool>> {
     let mut bits = Vec::new();
 
     for line in carrier_text.split('\n') {
+        // Strip trailing \r so CRLF content is handled correctly.
+        let line = line.trim_end_matches('\r');
+
         if line.is_empty() {
             continue;
         }
@@ -113,7 +123,7 @@ fn strip_trailing_zw(s: &str) -> String {
 /// line will have ZW content after embedding.
 pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Result<String> {
     let lines: Vec<&str> = carrier_text.split('\n').collect();
-    let usable = lines.iter().filter(|l| !l.is_empty()).count();
+    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
 
     let lines_needed = (bits.len() + BITS_PER_LINE - 1) / BITS_PER_LINE;
 
@@ -129,8 +139,6 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
     }
 
     // Pre-generate all random bytes needed for padding lines in one OS RNG call.
-    // This is faster than calling random_bytes(1) per line and ensures maximum
-    // entropy quality from a single large read.
     let padding_lines_count = usable.saturating_sub(lines_needed);
     let padding_rand = crate::crypto::random_bytes(padding_lines_count)
         .unwrap_or_else(|_| vec![0u8; padding_lines_count]);
@@ -140,12 +148,19 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
 
     for line in &lines {
-        if line.is_empty() {
-            out_lines.push(String::new());
+        // Separate any trailing \r for CRLF preservation.
+        let (content, cr) = if line.ends_with('\r') {
+            (&line[..line.len() - 1], "\r")
+        } else {
+            (*line, "")
+        };
+
+        if content.is_empty() {
+            out_lines.push(line.to_string());
             continue;
         }
 
-        let cleaned = strip_trailing_zw(line);
+        let cleaned = strip_trailing_zw(content);
 
         if bit_idx < bits.len() {
             // Embed real data bits
@@ -156,7 +171,7 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
                     bit_idx += 1;
                 }
             }
-            out_lines.push(format!("{cleaned}{suffix}"));
+            out_lines.push(format!("{cleaned}{suffix}{cr}"));
         } else {
             // Fill remaining lines with random ZW content from pre-generated buffer
             let byte = padding_rand.get(pad_idx).copied().unwrap_or(0);
@@ -166,7 +181,7 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
                 let bit = ((byte >> (7 - i)) & 1) == 1;
                 suffix.push(if bit { ZW1 } else { ZW0 });
             }
-            out_lines.push(format!("{cleaned}{suffix}"));
+            out_lines.push(format!("{cleaned}{suffix}{cr}"));
         }
     }
 
@@ -179,6 +194,9 @@ pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
     let mut bits = Vec::new();
 
     for line in carrier_text.split('\n') {
+        // Strip trailing \r so CRLF content is handled correctly.
+        let line = line.trim_end_matches('\r');
+
         if line.is_empty() {
             continue;
         }
@@ -207,5 +225,5 @@ pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
 
 /// Count the number of usable (non-empty) lines in the carrier.
 pub fn usable_lines(carrier_text: &str) -> usize {
-    carrier_text.split('\n').filter(|l| !l.is_empty()).count()
+    carrier_text.split('\n').filter(|l| !l.trim_end_matches('\r').is_empty()).count()
 }

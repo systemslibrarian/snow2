@@ -22,7 +22,7 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
 
     // Count how many lines are usable (we allow empty lines too, but empty lines are fragile;
     // for v0.1 we require non-empty lines to reduce accidental loss).
-    let usable = lines.iter().filter(|l| !l.is_empty()).count();
+    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
 
     if bits.len() > usable {
         bail!(
@@ -36,11 +36,19 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
 
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
     for line in lines.drain(..) {
-        if bit_idx < bits.len() && !line.is_empty() {
+        // Separate any trailing \r from the line content so we can
+        // preserve CRLF endings: content + marker + \r (if CRLF).
+        let (content, cr) = if line.ends_with('\r') {
+            (&line[..line.len() - 1], "\r")
+        } else {
+            (line, "")
+        };
+
+        if bit_idx < bits.len() && !content.is_empty() {
             // Remove existing trailing spaces/tabs to avoid ambiguity and reduce detection noise.
-            let trimmed = line.trim_end_matches([' ', '\t']);
+            let trimmed = content.trim_end_matches([' ', '\t']);
             let marker = if bits[bit_idx] { '\t' } else { ' ' };
-            out_lines.push(format!("{trimmed}{marker}"));
+            out_lines.push(format!("{trimmed}{marker}{cr}"));
             bit_idx += 1;
         } else {
             // Leave line unchanged
@@ -68,15 +76,14 @@ pub fn extract_bits(carrier_text: &str) -> Result<Vec<bool>> {
     let mut bits = Vec::new();
 
     for line in carrier_text.split('\n') {
+        // Strip trailing \r so CRLF content is handled correctly.
+        let line = line.trim_end_matches('\r');
+
         if line.is_empty() {
             continue;
         }
 
-        // Determine last trailing whitespace char (if any)
         let bytes = line.as_bytes();
-        if bytes.is_empty() {
-            continue;
-        }
 
         // Walk backwards over trailing spaces/tabs
         let mut idx = bytes.len();
@@ -106,7 +113,7 @@ pub fn extract_bits(carrier_text: &str) -> Result<Vec<bool>> {
 /// Defeats detection based on which lines have trailing whitespace.
 pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Result<String> {
     let lines: Vec<&str> = carrier_text.split('\n').collect();
-    let usable = lines.iter().filter(|l| !l.is_empty()).count();
+    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
 
     if bits.len() > usable {
         anyhow::bail!(
@@ -126,24 +133,31 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
 
     for line in &lines {
-        if line.is_empty() {
-            out_lines.push(String::new());
+        // Separate any trailing \r for CRLF preservation.
+        let (content, cr) = if line.ends_with('\r') {
+            (&line[..line.len() - 1], "\r")
+        } else {
+            (*line, "")
+        };
+
+        if content.is_empty() {
+            out_lines.push(line.to_string());
             continue;
         }
 
-        let trimmed = line.trim_end_matches([' ', '\t']);
+        let trimmed = content.trim_end_matches([' ', '\t']);
 
         if bit_idx < bits.len() {
             // Embed real data bit
             let marker = if bits[bit_idx] { '\t' } else { ' ' };
-            out_lines.push(format!("{trimmed}{marker}"));
+            out_lines.push(format!("{trimmed}{marker}{cr}"));
             bit_idx += 1;
         } else {
             // Fill remaining lines with random trailing whitespace from pre-generated buffer
             let byte = padding_rand.get(pad_idx).copied().unwrap_or(0);
             pad_idx += 1;
             let marker = if (byte & 1) == 1 { '\t' } else { ' ' };
-            out_lines.push(format!("{trimmed}{marker}"));
+            out_lines.push(format!("{trimmed}{marker}{cr}"));
         }
     }
 
@@ -156,6 +170,9 @@ pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
     let mut bits = Vec::new();
 
     for line in carrier_text.split('\n') {
+        // Strip trailing \r so CRLF content is handled correctly.
+        let line = line.trim_end_matches('\r');
+
         if line.is_empty() {
             continue;
         }
@@ -178,5 +195,5 @@ pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
 
 /// Count the number of usable (non-empty) lines in the carrier.
 pub fn usable_lines(carrier_text: &str) -> usize {
-    carrier_text.split('\n').filter(|l| !l.is_empty()).count()
+    carrier_text.split('\n').filter(|l| !l.trim_end_matches('\r').is_empty()).count()
 }

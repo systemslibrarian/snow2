@@ -11,7 +11,7 @@ All encryption and steganography happens **entirely in the browser** — no serv
 - **Security settings**: Password, optional pepper / Signal Key, pepper-required policy
 - **Tunable KDF**: Configurable Argon2id memory, iterations, and parallelism
 - **Carrier tools**: Generate carrier text, download output files
-- **Extract output**: UTF-8 text preview + raw binary download
+- **Extract output**: UTF-8 text preview + raw base64 data
 
 ## Build WASM
 
@@ -39,7 +39,7 @@ Then open http://localhost:8000.
 3. **Embedding** uses the v4 hardened pipeline:
    - Builds a SNOW2 v4 container (optional deflate compression → Argon2id → HKDF-SHA256 domain-separated key → XChaCha20-Poly1305 inner AEAD)
    - Pads to a constant-size bucket (multiples of 64 bytes) to mask message length
-   - Outer-encrypts the padded container with a BLAKE3-derived key + XChaCha20-Poly1305
+   - Outer-encrypts the padded container with an Argon2-derived key + XChaCha20-Poly1305
    - Converts to raw bits (no CRC framing — outer AEAD provides integrity)
    - Embeds bits into carrier lines as zero-width Unicode (U+200B = 0, U+200C = 1), **8 bits per line**
    - **Random-fills ALL remaining carrier lines** with random ZW content — eliminates statistical boundary between message and padding
