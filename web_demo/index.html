@@ -86,11 +86,12 @@
       </div>
 
       <label>
-        Output text with hidden message (copy / download)
+        Output text with hidden message
         <textarea id="outCarrier" rows="10" readonly></textarea>
       </label>
 
       <div class="row">
+        <button id="copyCarrier">Copy to clipboard</button>
         <button id="downloadCarrier">Download file</button>
       </div>
 
@@ -111,14 +112,18 @@
 
       <div class="row">
         <button id="extractBtn">Extract →</button>
-        <button id="downloadRecovered">Download file</button>
-        <button id="clearExtractBtn">Clear extraction fields</button>
       </div>
 
       <label>
         Recovered (UTF-8 if possible)
         <textarea id="recoveredText" rows="6" readonly></textarea>
       </label>
+
+      <div class="row">
+        <button id="copyRecovered">Copy to clipboard</button>
+        <button id="downloadRecovered">Download file</button>
+        <button id="clearExtractBtn">Clear extraction fields</button>
+      </div>
 
       <label>
         Recovered (base64)
