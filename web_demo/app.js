@@ -45,16 +45,21 @@ function flash(btn, msg) {
 
 function generateCarrier(lines = 6000) {
   const phrases = [
-    "the quick brown fox jumps over the lazy dog",
-    "nothing to see here, just ordinary text",
-    "a perfectly normal line of carrier text",
-    "some days the weather is sunny and warm",
-    "every great journey begins with a single step",
-    "the stars come out one by one at dusk",
-    "a watched pot never boils, they say",
-    "books lined the shelves from floor to ceiling",
-    "the river runs quietly through the valley",
-    "time flies when you are having fun",
+    "The first real snowfall of the season blanketed the mountains overnight",
+    "Polar bears roam the frozen tundra in search of seals beneath the ice",
+    "Arctic foxes change their fur from brown to white as winter approaches",
+    "The northern lights danced across the sky in shimmering curtains of green",
+    "Glaciers move imperceptibly, carving valleys over thousands of years",
+    "Fresh powder covered every rooftop and fence post in the small village",
+    "Researchers at the weather station recorded the lowest temperature this decade",
+    "Snowflakes are unique — no two crystals share exactly the same structure",
+    "The frozen lake was perfectly still, reflecting the pale winter sun",
+    "Huskies pulled the sled effortlessly through the deep, untouched snow",
+    "Ice fishermen drilled holes and waited patiently in the bitter cold",
+    "A thin layer of frost decorated every window pane in the cabin",
+    "The river had frozen solid, forming a natural bridge across the gorge",
+    "Children built an enormous snowman in the town square after school",
+    "Warm cocoa and wool blankets made the blizzard outside almost welcome",
   ];
   const out = [];
   for (let i = 0; i < lines; i++) {
@@ -107,6 +112,10 @@ async function main() {
   // Shared state for recovered binary data — accessible to extract, download, clear
   let recoveredB64 = null;
 
+  // ZW marker toggle state
+  let zwVisible = false;
+  let zwOriginalText = "";
+
   $("genCarrier").addEventListener("click", () => {
     $("carrier").value = generateCarrier(6000);
     status(embedStatus, "ok", "Sample cover text generated (6,000 lines). Ready to embed.");
@@ -140,11 +149,18 @@ async function main() {
       $("outCarrier").value = outCarrier;
       $("extractCarrier").value = outCarrier;
 
+      // Reset ZW marker toggle
+      zwVisible = false;
+      zwOriginalText = "";
+      $("toggleZw").textContent = "Show hidden markers";
+
       // Auto-select output so the user can immediately Ctrl+C
       $("outCarrier").focus();
       $("outCarrier").select();
 
-      status(embedStatus, "ok", "Embedded successfully. Text is selected — copy it (Ctrl+C) or use the buttons below.");
+      // Count ZW chars used
+      const zwCount = (outCarrier.match(/[\u200B\u200C]/g) || []).length;
+      status(embedStatus, "ok", `Message hidden successfully! (${zwCount} zero-width characters used across ${carrier.split("\n").length} lines)`);
     } catch (e) {
       status(embedStatus, "err", String(e?.message || e));
     }
@@ -196,7 +212,7 @@ async function main() {
       // Store recovered data for later download
       recoveredB64 = res.as_base64;
 
-      status(extractStatus, "ok", `Extracted ${res.bytes_len} bytes.`);
+      status(extractStatus, "ok", `Extracted ${res.bytes_len} bytes successfully.`);
     } catch (e) {
       status(extractStatus, "err", String(e?.message || e));
     }
@@ -244,6 +260,9 @@ async function main() {
     $("kdfIters").value = 3;
     $("kdfPar").value = 1;
     recoveredB64 = null;
+    zwVisible = false;
+    zwOriginalText = "";
+    $("toggleZw").textContent = "Show hidden markers";
     status(embedStatus, "", "");
     status(extractStatus, "", "");
   }
@@ -259,6 +278,39 @@ async function main() {
     $("recoveredB64").value = "";
     recoveredB64 = null;
     status(extractStatus, "ok", "Extraction fields cleared.");
+  });
+
+  // --- Show / hide zero-width markers toggle ---
+  $("toggleZw").addEventListener("click", () => {
+    const ta = $("outCarrier");
+    if (!ta.value) {
+      status(embedStatus, "err", "Nothing to inspect — embed a message first.");
+      return;
+    }
+
+    if (!zwVisible) {
+      // Show markers
+      zwOriginalText = ta.value;
+      ta.value = zwOriginalText
+        .replace(/\u200B/g, "\u00B7")   // ZWSP → ·
+        .replace(/\u200C/g, "\u2022");  // ZWNJ → •
+      $("toggleZw").textContent = "Hide markers";
+      status(embedStatus, "ok", "Zero-width characters shown as · (0) and • (1). This is for demo only — click Hide to restore.");
+    } else {
+      // Restore original
+      ta.value = zwOriginalText;
+      $("toggleZw").textContent = "Show hidden markers";
+      status(embedStatus, "ok", "Original text restored.");
+    }
+    zwVisible = !zwVisible;
+  });
+
+  // Reset toggle state when new embed happens
+  const origEmbedClick = $("embedBtn").onclick;
+  $("outCarrier").addEventListener("input", () => {
+    zwVisible = false;
+    zwOriginalText = "";
+    $("toggleZw").textContent = "Show hidden markers";
   });
 
   // Pre-fill a carrier to make first use easy
