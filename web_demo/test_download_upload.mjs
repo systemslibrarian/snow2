@@ -11,12 +11,22 @@
  *   7. Clicks "Decrypt & Reveal" → original message recovered
  */
 
-import { readFileSync, writeFileSync, unlinkSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
 
-// ── Load WASM (same way the browser demo does) ──
+// ── Pre-check: ensure WASM package has been built ─────────────────────
 const pkgDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "pkg");
+if (!existsSync(path.join(pkgDir, "snow2_wasm_bg.wasm"))) {
+  console.error(
+    "ERROR: WASM package not found at web_demo/pkg/.\n" +
+    "       Run 'scripts/wasm_test.sh' or build manually:\n" +
+    "       wasm-pack build snow2_wasm --target web --out-dir ../web_demo/pkg\n"
+  );
+  process.exit(1);
+}
+
+// ── Load WASM (same way the browser demo does) ──
 const wasmBytes = readFileSync(path.join(pkgDir, "snow2_wasm_bg.wasm"));
 const js = await import(path.join(pkgDir, "snow2_wasm.js"));
 await js.default(wasmBytes);

@@ -141,11 +141,13 @@ pub fn embed(
     padded.extend_from_slice(&container_bytes);
     padded.extend_from_slice(&random_pad);
 
-    // Outer AEAD encrypt — derived from Argon2 with standard KDF params.
-    // Always uses recommended() params so extraction can derive the same key
-    // without knowing the container's custom KDF settings.
+    // Outer AEAD encrypt — uses the same KDF strength as the container.
+    // `outer_profile()` returns recommended() or hardened() depending on
+    // the container's KDF params, so the outer layer never undercuts the
+    // configured password-resistance model.
     let salt = container.salt_bytes()?;
-    let outer_params = crypto::KdfParams::recommended();
+    let inner_kdf = container.kdf_params();
+    let outer_params = inner_kdf.outer_profile();
     let outer_master = crypto::derive_master_secret(password, &salt, &outer_params)?;
     let outer_key = crypto::derive_outer_key_from_master(&outer_master)?;
     let outer_blob = crypto::outer_seal_with_key(&outer_key, &salt, &padded)?;
@@ -206,9 +208,9 @@ pub fn embed_with_options(
     padded.extend_from_slice(&container_bytes);
     padded.extend_from_slice(&random_pad);
 
-    // Outer AEAD encrypt — derived from Argon2 with standard KDF params
+    // Outer AEAD encrypt — uses the same KDF strength as the container.
     let salt = container.salt_bytes()?;
-    let outer_params = crypto::KdfParams::recommended();
+    let outer_params = opts.security.kdf.outer_profile();
     let outer_master = crypto::derive_master_secret(password, &salt, &outer_params)?;
     let outer_key = crypto::derive_outer_key_from_master(&outer_master)?;
     let outer_blob = crypto::outer_seal_with_key(&outer_key, &salt, &padded)?;
@@ -269,65 +271,71 @@ fn try_v4_extract(
     // Read the Argon2 salt from the first 16 bytes (in the clear).
     let salt = &raw_bytes[..16];
 
-    // We need to know the KDF params to run Argon2, but they're inside the
-    // encrypted container.  Try with recommended defaults first — the v4 embed
-    // path always stores the same KDF params used at embed time inside the
-    // container header, and re-derives the inner key from the master secret
-    // after parsing the header.  For the outer key we use the default params
-    // from the embed path.
-    //
-    // Strategy: try Argon2 with a series of plausible KDF configs.
-    // The standard embed uses `recommended()` defaults.  Custom configs
-    // are stored inside the container; we'll try the default first.
-    let default_params = crypto::KdfParams::recommended();
+    // We need to know the outer KDF profile to run Argon2, but the actual
+    // KDF params are inside the encrypted container.  The embed path uses
+    // `outer_profile()` which maps the container's KDF params to one of
+    // two standard profiles: `recommended()` or `hardened()`.  We try
+    // both, starting with the cheaper one.
+    let profiles = [
+        crypto::KdfParams::recommended(),
+        crypto::KdfParams::hardened(),
+    ];
 
-    // Derive master secret once (expensive Argon2 — but only once).
-    let master = match crypto::derive_master_secret(password, salt, &default_params) {
-        Ok(m) => m,
-        Err(_) => return Ok(None), // Salt too short or invalid — not v4
-    };
+    for (pi, outer_params) in profiles.iter().enumerate() {
+        // Derive master secret (expensive Argon2 — once per profile).
+        let master = match crypto::derive_master_secret(password, salt, outer_params) {
+            Ok(m) => m,
+            Err(_) => continue, // Salt too short or invalid — skip
+        };
 
-    let outer_key = crypto::derive_outer_key_from_master(&master)?;
+        let outer_key = crypto::derive_outer_key_from_master(&master)?;
 
-    // Try each bucket size
-    let mut bucket = 64;
-    while bucket <= max_candidate {
-        // Outer blob size: salt(16) + nonce(24) + bucket_data + tag(16)
-        let blob_len = 16 + 24 + bucket + 16;
-        if blob_len > raw_bytes.len() {
-            break;
+        // Try each bucket size
+        let mut bucket = 64;
+        while bucket <= max_candidate {
+            // Outer blob size: salt(16) + nonce(24) + bucket_data + tag(16)
+            let blob_len = 16 + 24 + bucket + 16;
+            if blob_len > raw_bytes.len() {
+                break;
+            }
+
+            let blob = &raw_bytes[..blob_len];
+            if let Ok(padded) = crypto::outer_open(&outer_key, blob) {
+                // ── Outer AEAD succeeded — this IS a v4 container ───────────
+                if padded.len() < 4 {
+                    bail!("V4 outer decryption produced too few bytes.");
+                }
+                let real_len = u32::from_le_bytes(
+                    padded[0..4]
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("V4 inner length parse error"))?,
+                ) as usize;
+                if 4 + real_len > padded.len() {
+                    bail!(
+                        "V4 inner length ({}) exceeds padded buffer ({}).",
+                        real_len,
+                        padded.len() - 4
+                    );
+                }
+                let container_bytes = &padded[4..4 + real_len];
+
+                // Parse v4 container
+                let container = container::Snow2Container::from_bytes_v4(container_bytes)?;
+
+                // The inner AEAD key is derived from the container's own KDF
+                // params (which may differ from the outer layer's profile).
+                // `open()` handles this derivation internally.
+                let plaintext = container.open(password, pepper, _pqc_sk)?;
+                return Ok(Some(plaintext));
+            }
+            bucket += 64;
         }
 
-        let blob = &raw_bytes[..blob_len];
-        if let Ok(padded) = crypto::outer_open(&outer_key, blob) {
-            // ── Outer AEAD succeeded — this IS a v4 container ───────────
-            if padded.len() < 4 {
-                bail!("V4 outer decryption produced too few bytes.");
-            }
-            let real_len = u32::from_le_bytes(
-                padded[0..4]
-                    .try_into()
-                    .map_err(|_| anyhow::anyhow!("V4 inner length parse error"))?,
-            ) as usize;
-            if 4 + real_len > padded.len() {
-                bail!(
-                    "V4 inner length ({}) exceeds padded buffer ({}).",
-                    real_len,
-                    padded.len() - 4
-                );
-            }
-            let container_bytes = &padded[4..4 + real_len];
-
-            // Parse v4 container
-            let container = container::Snow2Container::from_bytes_v4(container_bytes)?;
-
-            // The inner AEAD key is derived from the container's own KDF
-            // params (which may differ from the outer layer's recommended
-            // defaults).  `open()` handles this derivation internally.
-            let plaintext = container.open(password, pepper, _pqc_sk)?;
-            return Ok(Some(plaintext));
+        // If recommended() didn't match any bucket, try hardened() next.
+        // After both profiles are exhausted, fall through to Ok(None).
+        if pi == profiles.len() - 1 {
+            // Both profiles exhausted — not a v4 container (or wrong password).
         }
-        bucket += 64;
     }
     Ok(None)
 }

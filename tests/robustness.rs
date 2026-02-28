@@ -124,8 +124,18 @@ fn outer_and_inner_roundtrip_with_pepper() {
 #[test]
 fn embed_rejects_payload_exceeding_bucket_limit() {
     let carrier = big_carrier(100_000);
-    // A payload larger than ~64 KiB should hit the V4_MAX_BUCKET guard.
-    let payload = vec![0xABu8; 65_000];
+    // A payload of ~65 KiB of incompressible data should hit the
+    // V4_MAX_BUCKET guard after deflate + container overhead push the
+    // padded bucket above 65 536 bytes.
+    let mut payload = vec![0u8; 65_536];
+    let mut state: u32 = 0xDEAD_BEEF;
+    for b in payload.iter_mut() {
+        // Simple xorshift32 PRNG — produces incompressible output.
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        *b = state as u8;
+    }
 
     let err = snow2::embed(
         Mode::ClassicTrailing,
@@ -248,7 +258,9 @@ fn mixed_crlf_lf_carrier_roundtrip() {
 
 #[test]
 fn crlf_carrier_preserves_cr_in_output() {
-    let carrier = big_carrier_crlf(100);
+    // V4 pipeline needs ~960+ bits minimum (outer blob ≥ 120 bytes).
+    // Classic mode = 1 bit/line, so we need well over 1000 lines.
+    let carrier = big_carrier_crlf(5000);
     let payload = b"cr preserve test";
 
     let stego = snow2::embed(Mode::ClassicTrailing, &carrier, payload, b"pw", None)
@@ -580,4 +592,109 @@ fn legacy_container_invalid_json_header() {
         msg.contains("parse header") || msg.contains("json") || msg.contains("expected"),
         "expected parse error, got: {msg}"
     );
+}
+
+// ── Outer KDF profile tests ─────────────────────────────────────────
+
+#[test]
+fn outer_profile_returns_recommended_for_default_kdf() {
+    use snow2::crypto::KdfParams;
+    let rec = KdfParams::recommended();
+    let profile = rec.outer_profile();
+    assert_eq!(profile.m_cost_kib, rec.m_cost_kib);
+    assert_eq!(profile.t_cost, rec.t_cost);
+}
+
+#[test]
+fn outer_profile_returns_hardened_for_strong_kdf() {
+    use snow2::crypto::KdfParams;
+    let custom = KdfParams {
+        m_cost_kib: 256 * 1024, // 256 MiB — exceeds recommended
+        t_cost: 5,
+        p_cost: 1,
+        out_len: 32,
+    };
+    let profile = custom.outer_profile();
+    let hard = KdfParams::hardened();
+    assert_eq!(profile.m_cost_kib, hard.m_cost_kib);
+    assert_eq!(profile.t_cost, hard.t_cost);
+}
+
+#[test]
+fn outer_profile_returns_hardened_when_only_t_cost_exceeds() {
+    use snow2::crypto::KdfParams;
+    let rec = KdfParams::recommended();
+    let custom = KdfParams {
+        m_cost_kib: rec.m_cost_kib, // same memory
+        t_cost: rec.t_cost + 1,     // but more iterations
+        p_cost: 1,
+        out_len: 32,
+    };
+    let profile = custom.outer_profile();
+    let hard = KdfParams::hardened();
+    assert_eq!(profile.m_cost_kib, hard.m_cost_kib);
+    assert_eq!(profile.t_cost, hard.t_cost);
+}
+
+#[test]
+fn embed_with_hardened_kdf_roundtrips() {
+    // Embed with hardened KDF (outer layer should auto-select hardened profile).
+    // Extract should try both profiles and find the hardened one.
+    let carrier = big_carrier(5000);
+    let payload = b"hardened kdf roundtrip";
+
+    let sec = EmbedSecurityOptions {
+        kdf: snow2::crypto::KdfParams::hardened(),
+        pepper_required: false,
+    };
+    let opts = EmbedOptions { security: sec, ..Default::default() };
+
+    let stego = snow2::embed_with_options(
+        Mode::ClassicTrailing,
+        &carrier,
+        payload,
+        b"pw",
+        None,
+        &opts,
+    )
+    .expect("embed with hardened KDF should succeed");
+
+    let recovered = snow2::extract(
+        Mode::ClassicTrailing,
+        &stego,
+        b"pw",
+        None,
+        None,
+    )
+    .expect("extract should succeed even though outer uses hardened profile");
+
+    assert_eq!(&*recovered, payload);
+}
+
+#[test]
+fn embed_default_then_extract_still_works() {
+    // Regression: default embed (recommended KDF) should still roundtrip
+    // after the dual-profile extract change.
+    let carrier = big_carrier(5000);
+    let payload = b"default kdf roundtrip";
+
+    let stego = snow2::embed(
+        Mode::ClassicTrailing,
+        &carrier,
+        payload,
+        b"pw",
+        None,
+    )
+    .expect("embed should succeed");
+
+    let recovered = snow2::extract(
+        Mode::ClassicTrailing,
+        &stego,
+        b"pw",
+        None,
+        None,
+    )
+    .expect("extract should succeed");
+
+    assert_eq!(&*recovered, payload);
 }

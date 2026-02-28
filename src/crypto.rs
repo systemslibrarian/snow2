@@ -90,6 +90,22 @@ impl KdfParams {
         }
     }
 
+    /// Determine which standard KDF profile to use for the outer AEAD layer.
+    ///
+    /// Returns `recommended()` if these parameters fit within the
+    /// recommended bounds, otherwise returns `hardened()`.  This ensures
+    /// the outer layer never undercuts the configured password-resistance
+    /// model while keeping the extract-side search space small (two
+    /// profiles).
+    pub fn outer_profile(&self) -> Self {
+        let rec = Self::recommended();
+        if self.m_cost_kib <= rec.m_cost_kib && self.t_cost <= rec.t_cost {
+            rec
+        } else {
+            Self::hardened()
+        }
+    }
+
     /// Validate that these parameters fall within the extraction-side safety
     /// bounds. Returns `Ok(())` if acceptable, or an error describing which
     /// bound was violated.

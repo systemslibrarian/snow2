@@ -6,15 +6,28 @@
  *
  * Run:  node web_demo/test_wasm.mjs
  */
-import { readFile } from "node:fs/promises";
+import { readFile, access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// ── Pre-check: ensure WASM package has been built ─────────────────────
+const pkgDir = join(__dirname, "pkg");
+try {
+  await access(join(pkgDir, "snow2_wasm_bg.wasm"));
+} catch {
+  console.error(
+    "ERROR: WASM package not found at web_demo/pkg/.\n" +
+    "       Run 'scripts/wasm_test.sh' or build manually:\n" +
+    "       wasm-pack build snow2_wasm --target web --out-dir ../web_demo/pkg\n"
+  );
+  process.exit(1);
+}
+
 // ── Load WASM module (Node doesn't have fetch/import.meta.url for .wasm) ──
-const wasmBytes = await readFile(join(__dirname, "pkg", "snow2_wasm_bg.wasm"));
-const mod = await import(join(__dirname, "pkg", "snow2_wasm.js"));
+const wasmBytes = await readFile(join(pkgDir, "snow2_wasm_bg.wasm"));
+const mod = await import(join(pkgDir, "snow2_wasm.js"));
 const wasmModule = await WebAssembly.compile(wasmBytes);
 mod.initSync({ module: wasmModule });
 

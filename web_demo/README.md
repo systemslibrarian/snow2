@@ -18,11 +18,21 @@ All encryption and steganography happens **entirely in the browser** — no serv
 From repo root:
 
 ```bash
-cargo install wasm-pack
-cd snow2_wasm
-wasm-pack build --target web --out-dir web_demo/pkg
-cp -r web_demo/pkg ../web_demo/pkg
+cargo install wasm-pack   # one-time setup
+# Build WASM and output directly into web_demo/pkg/
+wasm-pack build snow2_wasm --target web --out-dir ../web_demo/pkg
 ```
+
+Or equivalently from inside `snow2_wasm/`:
+
+```bash
+cd snow2_wasm
+wasm-pack build --target web --out-dir ../web_demo/pkg
+```
+
+> **Fresh checkout?**  The `web_demo/pkg/` directory is gitignored. You must
+> run the wasm-pack build above before serving or running tests.  The
+> automated script `scripts/wasm_test.sh` handles both building and testing.
 
 ## Serve Locally
 
