@@ -170,6 +170,23 @@ button.flash-ok {
 
 .toggle-zw:hover { color: var(--accent); }
 
+.b64-details {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.b64-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.b64-details textarea {
+  margin-top: 6px;
+}
+
 footer {
   max-width: 980px;
   margin: 8px auto 24px;

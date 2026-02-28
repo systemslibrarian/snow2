@@ -118,13 +118,13 @@ async function main() {
 
   $("genCarrier").addEventListener("click", () => {
     $("carrier").value = generateCarrier(6000);
-    status(embedStatus, "ok", "Sample cover text generated (6,000 lines). Ready to embed.");
+    status(embedStatus, "ok", "Sample cover text generated (6,000 lines). Ready to encrypt.");
   });
 
   $("embedBtn").addEventListener("click", () => {
     if (!requireWasm(embedStatus)) return;
     try {
-      status(embedStatus, "", "Embedding…");
+      status(embedStatus, "", "Encrypting & hiding…");
 
       const { password, pepper, pepperRequired, kdfMib, kdfIters, kdfPar } = getSecurityInputs();
       const message = $("message").value;
@@ -132,7 +132,7 @@ async function main() {
 
       if (!password) throw new Error("Password is required — enter one in Security Settings above.");
       if (!carrier.trim()) throw new Error("Cover text is required — paste text or click 'Generate sample text'.");
-      if (!message) throw new Error("Message is required — type something in 'Message to hide'.");
+      if (!message) throw new Error("Enter a secret message to encrypt.");
       if (pepperRequired && !pepper) throw new Error("Pepper is required (policy enabled) — enter one in Security Settings above.");
 
       const outCarrier = embed_websafe_zw(
@@ -160,7 +160,7 @@ async function main() {
 
       // Count ZW chars used
       const zwCount = (outCarrier.match(/[\u200B\u200C]/g) || []).length;
-      status(embedStatus, "ok", `Message hidden successfully! (${zwCount} zero-width characters used across ${carrier.split("\n").length} lines)`);
+      status(embedStatus, "ok", `Encrypted & hidden! (${zwCount} invisible characters inserted). Copy the output and send it anywhere.`);
     } catch (e) {
       status(embedStatus, "err", String(e?.message || e));
     }
@@ -169,7 +169,7 @@ async function main() {
   $("downloadCarrier").addEventListener("click", () => {
     const text = $("outCarrier").value;
     if (!text) {
-      status(embedStatus, "err", "Nothing to download — embed a message first.");
+      status(embedStatus, "err", "Nothing to download — encrypt a message first.");
       return;
     }
     downloadText("snow2_carrier_out.txt", text);
@@ -178,7 +178,7 @@ async function main() {
   $("copyCarrier").addEventListener("click", async () => {
     const text = $("outCarrier").value;
     if (!text) {
-      status(embedStatus, "err", "Nothing to copy — embed a message first.");
+      status(embedStatus, "err", "Nothing to copy — encrypt a message first.");
       return;
     }
     try {
@@ -196,12 +196,12 @@ async function main() {
   $("extractBtn").addEventListener("click", () => {
     if (!requireWasm(extractStatus)) return;
     try {
-      status(extractStatus, "", "Extracting…");
+      status(extractStatus, "", "Decrypting…");
 
       const { password, pepper } = getSecurityInputs();
       const carrier = $("extractCarrier").value;
 
-      if (!password) throw new Error("Password is required — enter the same password used to embed (in Security Settings above).");
+      if (!password) throw new Error("Password is required — enter the same password used to encrypt (in Security Settings above).");
       if (!carrier.trim()) throw new Error("Paste the text containing the hidden message above.");
 
       const res = extract_websafe_zw(carrier, password, pepper);
@@ -212,7 +212,7 @@ async function main() {
       // Store recovered data for later download
       recoveredB64 = res.as_base64;
 
-      status(extractStatus, "ok", `Extracted ${res.bytes_len} bytes successfully.`);
+      status(extractStatus, "ok", `Decrypted successfully! (${res.bytes_len} bytes recovered)`);
     } catch (e) {
       status(extractStatus, "err", String(e?.message || e));
     }
@@ -220,30 +220,13 @@ async function main() {
 
   $("downloadRecovered").addEventListener("click", () => {
     if (!recoveredB64) {
-      status(extractStatus, "err", "Nothing to download. Extract a message first.");
+      status(extractStatus, "err", "Nothing to download. Decrypt a message first.");
       return;
     }
     const binStr = atob(recoveredB64);
     const bytes = new Uint8Array(binStr.length);
     for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
     downloadBytes("recovered.bin", bytes);
-  });
-
-  $("copyRecovered").addEventListener("click", async () => {
-    const text = $("recoveredText").value;
-    if (!text) {
-      status(extractStatus, "err", "Nothing to copy. Extract a message first.");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      flash($("copyRecovered"), "Copied!");
-      status(extractStatus, "ok", "Copied to clipboard.");
-    } catch (e) {
-      $("recoveredText").focus();
-      $("recoveredText").select();
-      status(extractStatus, "ok", "Text selected — press Ctrl+C to copy.");
-    }
   });
 
   function clearAll() {
@@ -277,14 +260,14 @@ async function main() {
     $("recoveredText").value = "";
     $("recoveredB64").value = "";
     recoveredB64 = null;
-    status(extractStatus, "ok", "Extraction fields cleared.");
+    status(extractStatus, "ok", "Cleared.");
   });
 
   // --- Show / hide zero-width markers toggle ---
   $("toggleZw").addEventListener("click", () => {
     const ta = $("outCarrier");
     if (!ta.value) {
-      status(embedStatus, "err", "Nothing to inspect — embed a message first.");
+      status(embedStatus, "err", "Nothing to inspect — encrypt a message first.");
       return;
     }
 
