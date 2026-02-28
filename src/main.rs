@@ -544,25 +544,34 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
 
     // ── Capacity estimates ───────────────────────────────────────────
     //
-    // Each non-empty line carries 1 bit. The overhead includes:
-    //   - Bitstream framing: 8 bytes (4 length + 4 CRC-32) = 64 bits
+    // classic-trailing: 1 bit per non-empty line
+    // websafe-zw: 8 bits (1 byte) per non-empty line
+    //
+    // Overhead includes:
+    //   - Bitstream framing: 8 bytes (4 length + 4 CRC-32)
     //   - Container structure: 10 bytes fixed (5 magic + 1 version + 4 header_len)
     //   - Container header JSON: ~250–350 bytes typical (varies with KDF params)
     //   - AEAD tag: 16 bytes (Poly1305)
     //
-    // We estimate conservatively with ~300 bytes container overhead.
-    let raw_bits = non_empty_lines;
+    // We estimate conservatively with ~330 bytes container overhead.
     let framing_overhead_bytes: usize = 8; // length (4) + CRC-32 (4)
     let container_overhead_bytes: usize = 330; // magic+ver+hdrlen+header_json+tag (conservative)
     let total_overhead_bytes = framing_overhead_bytes + container_overhead_bytes;
-    let total_overhead_bits = total_overhead_bytes * 8;
 
-    let usable_bits = raw_bits.saturating_sub(total_overhead_bits);
-    let usable_bytes = usable_bits / 8;
+    // classic-trailing: 1 bit per line
+    let classic_raw_bits = non_empty_lines;
+    let classic_total_overhead_bits = total_overhead_bytes * 8;
+    let classic_usable_bits = classic_raw_bits.saturating_sub(classic_total_overhead_bits);
+    let classic_usable_bytes = classic_usable_bits / 8;
+    let classic_raw_bytes = classic_raw_bits.saturating_sub(framing_overhead_bytes * 8) / 8;
 
-    // Also show raw capacity (before container overhead) for reference
-    let raw_usable_bits = raw_bits.saturating_sub(framing_overhead_bytes * 8);
-    let raw_usable_bytes = raw_usable_bits / 8;
+    // websafe-zw: 8 bits per line
+    let zw_bits_per_line: usize = 8;
+    let zw_raw_bits = non_empty_lines * zw_bits_per_line;
+    let zw_total_overhead_bits = total_overhead_bytes * 8;
+    let zw_usable_bits = zw_raw_bits.saturating_sub(zw_total_overhead_bits);
+    let zw_usable_bytes = zw_usable_bits / 8;
+    let zw_raw_bytes = zw_raw_bits.saturating_sub(framing_overhead_bytes * 8) / 8;
 
     // Detect line endings
     let crlf_count = carrier_bytes.windows(2).filter(|w| w == b"\r\n").count();
@@ -622,15 +631,24 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     println!("  Zero-width:    {} chars (longest run: {} lines)", zw_chars, consecutive_zw);
     println!("  Lines w/ tabs: {}", lines_with_tabs);
     println!();
-    println!("  Capacity (1 bit/non-empty line):");
-    println!("    Raw bits:    {} ({} bytes, before container overhead)", raw_bits, raw_usable_bytes);
-    println!("    Payload max: ~{} bytes (after ~{} bytes container+framing overhead)",
-             usable_bytes, total_overhead_bytes);
-
-    if usable_bytes == 0 {
-        println!("    NOTE: Carrier is too small for any payload with default settings.");
-    } else if usable_bytes < 64 {
-        println!("    NOTE: Very low capacity. Only tiny payloads will fit.");
+    println!("  Capacity:");
+    println!("    classic-trailing (1 bit/line):");
+    println!("      Raw:         {} bits ({} bytes)", classic_raw_bits, classic_raw_bytes);
+    println!("      Payload max: ~{} bytes (after ~{} bytes overhead)",
+             classic_usable_bytes, total_overhead_bytes);
+    if classic_usable_bytes == 0 {
+        println!("      NOTE: Carrier is too small for classic-trailing with default settings.");
+    } else if classic_usable_bytes < 64 {
+        println!("      NOTE: Very low capacity for classic-trailing.");
+    }
+    println!("    websafe-zw (8 bits/line):");
+    println!("      Raw:         {} bits ({} bytes)", zw_raw_bits, zw_raw_bytes);
+    println!("      Payload max: ~{} bytes (after ~{} bytes overhead)",
+             zw_usable_bytes, total_overhead_bytes);
+    if zw_usable_bytes == 0 {
+        println!("      NOTE: Carrier is too small for websafe-zw with default settings.");
+    } else if zw_usable_bytes < 64 {
+        println!("      NOTE: Very low capacity for websafe-zw.");
     }
     println!();
 

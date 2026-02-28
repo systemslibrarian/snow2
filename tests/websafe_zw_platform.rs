@@ -158,34 +158,37 @@ fn zwsp_replaced_with_normal_space_fails() {
 // ═══════════════════════════════════════════════════════════════════════
 
 /// Some systems insert BOM (U+FEFF) or ZWJ (U+200D) into text.
-/// If placed at end-of-line, these are NOT valid markers and should
-/// cause extraction to stop early.
+/// If placed at end-of-line after the ZW markers, these break the
+/// trailing ZW detection and cause extraction to stop at that line.
 #[test]
 fn bom_injection_at_line_end_truncates() {
-    let bits_in = vec![true, false, true, false, true];
+    // With 8 bits/line, embed 16 bits across 2 lines
+    let bits_in = vec![true, false, true, false, true, false, true, false,
+                       false, true, false, true, false, true, false, true];
     let c = carrier(10);
 
     let embedded = websafe_zw::embed_bits(&c, &bits_in).expect("embed ok");
 
-    // Inject BOM at end of line 3 (0-indexed: after 3rd non-empty line)
+    // Inject BOM at end of line 1 (2nd carrier line)
+    // The extractor reads trailing ZW chars via take_while from the end.
+    // BOM at the end means take_while stops immediately → 0 ZW bits from that line → stop.
     let mut lines: Vec<String> = embedded.split('\n').map(String::from).collect();
-    // Line 2 (3rd line) — append BOM after the ZW marker
-    // The extractor reads the LAST char. BOM at end means last char = BOM, not a marker.
-    lines[2] = format!("{}\u{FEFF}", lines[2]);
+    lines[1] = format!("{}\u{FEFF}", lines[1]);
 
     let mangled = lines.join("\n");
     let bits_out = websafe_zw::extract_bits(&mangled).expect("extract ok");
 
-    // Should get only 2 bits (stopped at line 3 where last char is BOM, not ZW0/ZW1)
-    // Wait — BOM is appended AFTER the ZW marker, so last char is BOM → stops.
-    assert_eq!(bits_out.len(), 2, "extraction should stop at BOM-injected line");
-    assert_eq!(bits_out, &bits_in[..2]);
+    // Should get only the 8 bits from line 0, then stop at line 1 (BOM breaks it)
+    assert_eq!(bits_out.len(), 8, "extraction should stop at BOM-injected line");
+    assert_eq!(bits_out, &bits_in[..8]);
 }
 
 /// ZWJ (U+200D) inserted at end of line — not a valid marker.
 #[test]
 fn zwj_injection_at_line_end_truncates() {
-    let bits_in = vec![false, true, false, true];
+    // With 8 bits/line, embed 16 bits across 2 lines
+    let bits_in = vec![false, true, false, true, false, true, false, true,
+                       true, false, true, false, true, false, true, false];
     let c = carrier(10);
 
     let embedded = websafe_zw::embed_bits(&c, &bits_in).expect("embed ok");
@@ -197,9 +200,9 @@ fn zwj_injection_at_line_end_truncates() {
     let mangled = lines.join("\n");
     let bits_out = websafe_zw::extract_bits(&mangled).expect("extract ok");
 
-    // Should get 1 bit (the first line), then stop at line 2 (last char = ZWJ)
-    assert_eq!(bits_out.len(), 1);
-    assert_eq!(bits_out[0], false);
+    // Should get 8 bits from line 0, then stop at line 1 (last char = ZWJ)
+    assert_eq!(bits_out.len(), 8);
+    assert_eq!(bits_out, &bits_in[..8]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
