@@ -64,6 +64,9 @@ async function main() {
   const embedStatus = $("embedStatus");
   const extractStatus = $("extractStatus");
 
+  // Shared state for recovered binary data — accessible to extract, download, clear
+  let recoveredB64 = null;
+
   $("genCarrier").addEventListener("click", () => {
     $("carrier").value = generateCarrier(6000);
     status(embedStatus, "ok", "Generated carrier with 6000 lines.");
@@ -123,17 +126,8 @@ async function main() {
       $("recoveredText").value = res.as_utf8 || "";
       $("recoveredB64").value = res.as_base64 || "";
 
-      // Store recovered data in a closure-scoped variable, not on window
-      let _recovered_b64 = res.as_base64;
-
-      // Update download handler to use closure-scoped data
-      $("downloadRecovered").onclick = () => {
-        if (!_recovered_b64) return;
-        const binStr = atob(_recovered_b64);
-        const bytes = new Uint8Array(binStr.length);
-        for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-        downloadBytes("recovered.bin", bytes);
-      };
+      // Store recovered data for later download
+      recoveredB64 = res.as_base64;
 
       status(extractStatus, "ok", `Extracted ${res.bytes_len} bytes.`);
     } catch (e) {
@@ -142,8 +136,14 @@ async function main() {
   });
 
   $("downloadRecovered").addEventListener("click", () => {
-    // Default handler — overridden after each extraction
-    status(extractStatus, "err", "Nothing to download. Extract first.");
+    if (!recoveredB64) {
+      status(extractStatus, "err", "Nothing to download. Extract first.");
+      return;
+    }
+    const binStr = atob(recoveredB64);
+    const bytes = new Uint8Array(binStr.length);
+    for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+    downloadBytes("recovered.bin", bytes);
   });
 
   $("clearBtn").addEventListener("click", () => {
@@ -155,6 +155,7 @@ async function main() {
     $("recoveredText").value = "";
     $("recoveredB64").value = "";
     $("pepperRequired").checked = false;
+    recoveredB64 = null;
     status(embedStatus, "", "");
     status(extractStatus, "ok", "Sensitive fields cleared.");
   });
