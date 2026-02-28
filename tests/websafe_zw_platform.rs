@@ -266,18 +266,20 @@ fn strip_last_embedded_line_marker_fails() {
     let stego = snow2::embed(Mode::WebSafeZeroWidth, &c, payload, password, None)
         .expect("embed ok");
 
-    // Find the last line that has a ZW marker
+    // With v4 hardened pipeline, all lines get ZW content (real data + random padding).
+    // Stripping a padding line won't cause failure because only the first N bytes matter.
+    // Instead, strip an EARLY marker line (in the real-data range) to corrupt the payload.
     let mut lines: Vec<String> = stego.split('\n').map(String::from).collect();
-    let last_marker_idx = lines
+    let first_marker_idx = lines
         .iter()
-        .rposition(|l| l.ends_with(ZW0) || l.ends_with(ZW1))
+        .position(|l| l.ends_with(ZW0) || l.ends_with(ZW1))
         .expect("should find a marker");
-    lines[last_marker_idx] = lines[last_marker_idx].replace(ZW0, "").replace(ZW1, "");
+    lines[first_marker_idx] = lines[first_marker_idx].replace(ZW0, "").replace(ZW1, "");
     let mangled = lines.join("\n");
 
-    // Missing final bits → CRC or length check fails
+    // Corrupting the real-data area → outer AEAD or inner AEAD check fails
     let err = snow2::extract(Mode::WebSafeZeroWidth, &mangled, password, None, None);
-    assert!(err.is_err(), "stripping last marker must fail");
+    assert!(err.is_err(), "stripping a real-data marker must fail");
 }
 
 // ═══════════════════════════════════════════════════════════════════════

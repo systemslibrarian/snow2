@@ -3,6 +3,39 @@ use anyhow::{anyhow, bail, Context, Result};
 pub mod classic_trailing;
 pub mod websafe_zw;
 
+// ── Raw bit ↔ byte conversion (no CRC framing) ──────────────────────────
+//
+// Used by the v4 hardened pipeline where outer AEAD already provides
+// integrity checking, making the CRC-32 frame redundant.
+
+/// Convert bytes to bits (MSB-first per byte) — raw, no framing.
+pub fn raw_bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
+    let mut bits = Vec::with_capacity(bytes.len() * 8);
+    for &b in bytes {
+        for i in (0..8).rev() {
+            bits.push(((b >> i) & 1) == 1);
+        }
+    }
+    bits
+}
+
+/// Convert bits to bytes (MSB-first per byte) — raw, no framing.
+/// Trailing bits that don't fill a full byte are discarded.
+pub fn raw_bits_to_bytes(bits: &[bool]) -> Vec<u8> {
+    let byte_count = bits.len() / 8;
+    let mut bytes = Vec::with_capacity(byte_count);
+    for i in 0..byte_count {
+        let mut b = 0u8;
+        for j in 0..8 {
+            b = (b << 1) | (bits[i * 8 + j] as u8);
+        }
+        bytes.push(b);
+    }
+    bytes
+}
+
+// ── CRC-framed bit ↔ byte conversion ────────────────────────────────────
+
 /// Convert bytes to a bit vector (MSB-first per byte).
 ///
 /// The bitstream is framed with a length prefix and a CRC-32 integrity checksum:

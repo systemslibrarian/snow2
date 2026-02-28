@@ -105,3 +105,100 @@ fn strip_trailing_zw(s: &str) -> String {
     }
     chars.into_iter().collect()
 }
+
+/// Embed bits AND fill ALL remaining non-empty lines with random ZW content.
+///
+/// This makes it impossible to detect which lines carry real data by
+/// checking for the presence/absence of ZW characters — every non-empty
+/// line will have ZW content after embedding.
+pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Result<String> {
+    let lines: Vec<&str> = carrier_text.split('\n').collect();
+    let usable = lines.iter().filter(|l| !l.is_empty()).count();
+
+    let lines_needed = (bits.len() + BITS_PER_LINE - 1) / BITS_PER_LINE;
+
+    if lines_needed > usable {
+        anyhow::bail!(
+            "Carrier too small for websafe-zw mode: need {} usable lines, have {} \
+             ({} bits at {} bits/line).",
+            lines_needed,
+            usable,
+            bits.len(),
+            BITS_PER_LINE
+        );
+    }
+
+    let mut bit_idx = 0usize;
+    let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
+
+    for line in &lines {
+        if line.is_empty() {
+            out_lines.push(String::new());
+            continue;
+        }
+
+        let cleaned = strip_trailing_zw(line);
+
+        if bit_idx < bits.len() {
+            // Embed real data bits
+            let mut suffix = String::new();
+            for _ in 0..BITS_PER_LINE {
+                if bit_idx < bits.len() {
+                    suffix.push(if bits[bit_idx] { ZW1 } else { ZW0 });
+                    bit_idx += 1;
+                }
+            }
+            out_lines.push(format!("{cleaned}{suffix}"));
+        } else {
+            // Fill remaining lines with random ZW content
+            let random_bytes = crate::crypto::random_bytes(1)
+                .unwrap_or_else(|_| vec![0u8]);
+            let byte = random_bytes[0];
+            let mut suffix = String::new();
+            for i in 0..BITS_PER_LINE {
+                let bit = ((byte >> (7 - i)) & 1) == 1;
+                suffix.push(if bit { ZW1 } else { ZW0 });
+            }
+            out_lines.push(format!("{cleaned}{suffix}"));
+        }
+    }
+
+    Ok(out_lines.join("\n"))
+}
+
+/// Extract ALL bits from ALL non-empty lines (does not stop at first
+/// unmarked line). Used by v4 pipeline where every line has ZW content.
+pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
+    let mut bits = Vec::new();
+
+    for line in carrier_text.split('\n') {
+        if line.is_empty() {
+            continue;
+        }
+
+        // Collect trailing ZW chars from this line.
+        let trailing: Vec<bool> = line
+            .chars()
+            .rev()
+            .take_while(|ch| *ch == ZW0 || *ch == ZW1)
+            .map(|ch| ch == ZW1)
+            .collect();
+
+        if trailing.is_empty() {
+            // No ZW chars — could be an unmodified line in a mixed carrier.
+            // Push 8 zero bits as filler so byte alignment is maintained.
+            for _ in 0..BITS_PER_LINE {
+                bits.push(false);
+            }
+        } else {
+            bits.extend(trailing.into_iter().rev());
+        }
+    }
+
+    bits
+}
+
+/// Count the number of usable (non-empty) lines in the carrier.
+pub fn usable_lines(carrier_text: &str) -> usize {
+    carrier_text.split('\n').filter(|l| !l.is_empty()).count()
+}

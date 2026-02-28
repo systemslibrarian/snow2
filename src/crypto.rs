@@ -288,3 +288,69 @@ pub fn aead_open(
     pt.zeroize();
     sv
 }
+
+// ── Outer encryption layer ───────────────────────────────────────────────
+//
+// The outer layer makes the entire embedded bitstream indistinguishable
+// from uniformly random bytes. This defeats byte-distribution and
+// entropy-based steganalysis.
+//
+// Key derivation: BLAKE3 derive_key (fast, no salt needed — the random
+// nonce provides per-message uniqueness).
+// Cipher: XChaCha20-Poly1305 (same as inner, independent key).
+
+/// Domain separation context for outer key derivation.
+const OUTER_KEY_CONTEXT: &str = "snow2.v4.outer.2026";
+
+/// Derive the outer encryption key from a password using BLAKE3 derive_key.
+///
+/// This is intentionally fast (no Argon2) because:
+/// 1. The inner AEAD already uses Argon2id for slow key derivation
+/// 2. The outer layer's purpose is obfuscation, not brute-force resistance
+/// 3. We need the key BEFORE seeing the inner container header (no salt available)
+pub fn derive_outer_key(password: &[u8]) -> ZeroizingKey {
+    let hash = blake3::derive_key(OUTER_KEY_CONTEXT, password);
+    Zeroizing::new(hash)
+}
+
+/// Outer AEAD seal: encrypt + authenticate with a fresh random nonce.
+/// Returns `nonce(24) || ciphertext+tag`.
+pub fn outer_seal(password: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
+    let key = derive_outer_key(password);
+    let nonce_bytes = random_bytes(24)?;
+
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
+    let n = XNonce::from_slice(&nonce_bytes);
+
+    let ct = cipher
+        .encrypt(n, Payload { msg: plaintext, aad: b"" })
+        .map_err(|e| anyhow!("Outer AEAD encrypt failed: {:?}", e))?;
+
+    let mut out = Vec::with_capacity(24 + ct.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+/// Outer AEAD open: split nonce, decrypt + verify.
+/// Input: `nonce(24) || ciphertext+tag`.
+/// Returns plaintext on success, error on failure (wrong password or corruption).
+pub fn outer_open(password: &[u8], blob: &[u8]) -> Result<Vec<u8>> {
+    if blob.len() < 24 + 16 {
+        bail!("Outer blob too short ({} bytes, need at least 40).", blob.len());
+    }
+    let key = derive_outer_key(password);
+    let nonce = &blob[..24];
+    let ct = &blob[24..];
+
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
+    let n = XNonce::from_slice(nonce);
+
+    let pt = cipher
+        .decrypt(n, Payload { msg: ct, aad: b"" })
+        .map_err(|_| {
+            anyhow!("Outer decryption failed (wrong password or no hidden message).")
+        })?;
+
+    Ok(pt)
+}

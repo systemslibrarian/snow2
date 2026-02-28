@@ -10,6 +10,10 @@ use crate::secure_mem::SecureVec;
 use crate::Mode;
 use subtle::ConstantTimeEq;
 
+use flate2::write::{DeflateEncoder, DeflateDecoder};
+use flate2::Compression;
+use std::io::Write;
+
 #[cfg(feature = "pqc")]
 use pqcrypto_traits::{sign::DetachedSignature, kem::PublicKey as KemPublicKey, sign::PublicKey as SignPublicKey};
 
@@ -36,6 +40,36 @@ const VERSION_COMPACT: u8 = 3;
 /// 53       4    plaintext_len (u32 LE)
 /// ```
 const COMPACT_HDR_LEN: usize = 57;
+
+/// Hardened version with outer encryption, plaintext compression,
+/// packed header, and no magic bytes on the wire.
+const VERSION_HARDENED: u8 = 4;
+
+/// V4 binary header layout (49 bytes):
+///
+/// ```text
+/// offset  size  field
+///  0       1    flags       (bit0=pepper_required, bit1=plaintext_compressed,
+///                            bit2-3=mode, bit4-5=aead, bit6-7=reserved)
+///  1       1    m_cost_log2 (log2 of m_cost_kib)
+///  2       2    t_cost      (u16 LE)
+///  4       1    p_cost      (u8)
+///  5      16    salt        (raw bytes)
+/// 21      24    nonce       (raw bytes)
+/// 45       4    plaintext_len (u32 LE, original uncompressed length)
+/// ```
+const V4_HDR_LEN: usize = 49;
+
+/// Constant-size padding buckets.  Every container is padded to one of
+/// these sizes (the smallest that fits) before outer encryption.  This
+/// masks the true message length from frequency analysis.
+///
+/// Bucket = inner_len rounded up to the next multiple of 64.
+/// Minimum bucket = 64.
+pub fn pad_bucket(inner_len: usize) -> usize {
+    let b = ((inner_len + 63) / 64) * 64;
+    if b < 64 { 64 } else { b }
+}
 
 /// Versioned container header.
 /// This header is authenticated (AAD) during encryption/decryption.
@@ -107,7 +141,7 @@ impl Snow2Container {
             return Self::seal_pqc(plaintext, mode, opts);
         }
 
-        Self::seal_compact(plaintext, password, pepper, mode, &opts.security)
+        Self::seal_v4(plaintext, password, pepper, mode, &opts.security)
     }
 
     /// Seal using a v1 JSON header.  No longer the default (compact v3 is
@@ -168,9 +202,9 @@ impl Snow2Container {
         })
     }
 
-    /// Seal with a compact binary header (v3).  Produces a much smaller
-    /// container than `seal_classic` because the header is a fixed 57-byte
-    /// binary blob instead of ~290-byte JSON.
+    /// Seal with a compact binary header (v3).  No longer the default
+    /// (v4 hardened is preferred) but kept for backward compatibility.
+    #[allow(dead_code)]
     fn seal_compact(
         plaintext: &[u8],
         password: &[u8],
@@ -221,6 +255,107 @@ impl Snow2Container {
         let header = Snow2Header {
             magic: String::from_utf8(MAGIC.to_vec()).expect("MAGIC is valid utf8"),
             version: VERSION_COMPACT,
+            mode: mode.as_str().to_string(),
+            kdf: opts.kdf.clone(),
+            pepper_required: opts.pepper_required,
+            salt_b64: STANDARD.encode(&salt),
+            nonce_b64: STANDARD.encode(&nonce),
+            aead: "XChaCha20-Poly1305".to_string(),
+            plaintext_len: plaintext.len() as u64,
+            #[cfg(feature = "pqc")]
+            pqc_kyber_pk_b64: None,
+            #[cfg(feature = "pqc")]
+            pqc_dilithium_pk_b64: None,
+        };
+
+        Ok(Self {
+            header,
+            ciphertext,
+            raw_header_aad: Some(bin_hdr),
+            #[cfg(feature = "pqc")]
+            pqc_signature: None,
+        })
+    }
+
+    /// Seal with the v4 hardened format.
+    ///
+    /// Improvements over v3:
+    /// - **Plaintext compression**: deflate before encryption (only if smaller)
+    /// - **Packed header**: 49 bytes (m_cost as log2, implicit out_len=32)
+    /// - **Stripped wire format**: no MAGIC or header_len on the wire
+    ///   (version byte + header + ciphertext only)
+    ///
+    /// The outer encryption layer and constant-size padding are handled
+    /// by the `embed` pipeline in `lib.rs`, not here.
+    fn seal_v4(
+        plaintext: &[u8],
+        password: &[u8],
+        pepper: Option<&[u8]>,
+        mode: Mode,
+        opts: &EmbedSecurityOptions,
+    ) -> Result<Self> {
+        if opts.pepper_required && pepper.is_none() {
+            bail!("Pepper is required by policy, but no pepper was provided.");
+        }
+        opts.kdf.validate_extraction_bounds()?;
+
+        if opts.kdf.p_cost > 255 {
+            bail!("p_cost {} exceeds v4 header max (255).", opts.kdf.p_cost);
+        }
+        // m_cost_kib must be a power of 2 for log2 encoding
+        if !opts.kdf.m_cost_kib.is_power_of_two() {
+            bail!(
+                "m_cost_kib {} is not a power of 2 (required for v4 log2 encoding).",
+                opts.kdf.m_cost_kib
+            );
+        }
+        let m_cost_log2 = opts.kdf.m_cost_kib.trailing_zeros() as u8;
+
+        // Compress plaintext if beneficial
+        let (effective_plaintext, compressed_flag) = {
+            let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
+            encoder.write_all(plaintext)?;
+            let compressed = encoder.finish()?;
+            if compressed.len() < plaintext.len() {
+                (compressed, true)
+            } else {
+                (plaintext.to_vec(), false)
+            }
+        };
+
+        let salt = crypto::random_bytes(16)?;
+        let nonce = crypto::random_bytes(24)?;
+
+        // Build v4 binary header (49 bytes)
+        let mode_bits: u8 = match mode {
+            Mode::ClassicTrailing => 0,
+            Mode::WebSafeZeroWidth => 1,
+        };
+        let flags: u8 = (if opts.pepper_required { 1 } else { 0 })
+            | (if compressed_flag { 1 << 1 } else { 0 })
+            | (mode_bits << 2)
+            | (0u8 << 4); // aead = XChaCha20-Poly1305
+
+        let mut bin_hdr = Vec::with_capacity(V4_HDR_LEN);
+        bin_hdr.push(flags);
+        bin_hdr.push(m_cost_log2);
+        bin_hdr.extend_from_slice(&(opts.kdf.t_cost as u16).to_le_bytes());
+        bin_hdr.push(opts.kdf.p_cost as u8);
+        bin_hdr.extend_from_slice(&salt);
+        bin_hdr.extend_from_slice(&nonce);
+        bin_hdr.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
+        debug_assert_eq!(bin_hdr.len(), V4_HDR_LEN);
+
+        // Derive key
+        let key = crypto::derive_key(password, pepper, &salt, &opts.kdf)?;
+
+        // AEAD seal: AAD = binary header
+        let ciphertext = crypto::aead_seal(&key, &nonce, &bin_hdr, &effective_plaintext)?;
+
+        // Build Snow2Header for in-memory representation
+        let header = Snow2Header {
+            magic: String::from_utf8(MAGIC.to_vec()).expect("MAGIC is valid utf8"),
+            version: VERSION_HARDENED,
             mode: mode.as_str().to_string(),
             kdf: opts.kdf.clone(),
             pepper_required: opts.pepper_required,
@@ -321,13 +456,18 @@ impl Snow2Container {
             return self.open_compact(password, pepper);
         }
 
+        if self.header.version == VERSION_HARDENED {
+            return self.open_v4(password, pepper);
+        }
+
         if self.header.version != VERSION {
             bail!(
-                "Unsupported SNOW2 container version: {} (expected {}, {}, or {}).",
+                "Unsupported SNOW2 container version: {} (expected {}, {}, {}, or {}).",
                 self.header.version,
                 VERSION,
                 PQC_VERSION,
                 VERSION_COMPACT,
+                VERSION_HARDENED,
             );
         }
         // SECURITY: Constant-time AEAD check
@@ -409,6 +549,53 @@ impl Snow2Container {
         Ok(plaintext)
     }
 
+    /// Open a v4 (hardened) container.
+    ///
+    /// Decompresses plaintext if the compressed flag is set.
+    fn open_v4(&self, password: &[u8], pepper: Option<&[u8]>) -> Result<SecureVec> {
+        let aad = self.raw_header_aad.as_ref()
+            .context("v4 container is missing raw binary header AAD")?;
+
+        let flags = aad[0];
+        let compressed = (flags & 0x02) != 0;
+
+        if self.header.pepper_required && pepper.is_none() {
+            bail!("Pepper is required by this container, but none was provided.");
+        }
+
+        self.header.kdf.validate_extraction_bounds()?;
+
+        // Salt at offset 5..21, nonce at offset 21..45
+        let salt = &aad[5..21];
+        let nonce = &aad[21..45];
+
+        let key = crypto::derive_key(password, pepper, salt, &self.header.kdf)?;
+        let decrypted = crypto::aead_open(&key, nonce, aad, &self.ciphertext)?;
+
+        // Decompress if plaintext was compressed
+        let plaintext = if compressed {
+            let mut decoder = DeflateDecoder::new(Vec::new());
+            decoder.write_all(&decrypted)
+                .context("deflate decompress failed")?;
+            let raw = decoder.finish()
+                .context("deflate decompress finish failed")?;
+            SecureVec::from_slice(&raw)
+                .context("SecureVec creation failed")?
+        } else {
+            decrypted
+        };
+
+        if plaintext.len() as u64 != self.header.plaintext_len {
+            bail!(
+                "Decrypted length mismatch (got {}, expected {}).",
+                plaintext.len(),
+                self.header.plaintext_len
+            );
+        }
+
+        Ok(plaintext)
+    }
+
     #[cfg(feature = "pqc")]
     fn open_pqc(&self, sk_bytes: &[u8]) -> Result<SecureVec> {
         use crate::pqc::{PqSecretKey};
@@ -470,6 +657,18 @@ impl Snow2Container {
 
     /// Serialize container to bytes (for stego embedding).
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        // v4 hardened: stripped wire format (no MAGIC, no header_len)
+        // [version(1)][header(49)][ciphertext]
+        if self.header.version == VERSION_HARDENED {
+            let bin_hdr = self.raw_header_aad.as_ref()
+                .context("v4 container missing raw_header_aad")?;
+            let mut out = Vec::with_capacity(1 + bin_hdr.len() + self.ciphertext.len());
+            out.push(VERSION_HARDENED);
+            out.extend_from_slice(bin_hdr);
+            out.extend_from_slice(&self.ciphertext);
+            return Ok(out);
+        }
+
         // Compact binary header (v3)
         if self.header.version == VERSION_COMPACT {
             let bin_hdr = self.raw_header_aad.as_ref()
@@ -671,6 +870,81 @@ impl Snow2Container {
         let ciphertext = input[header_end..].to_vec();
         if ciphertext.is_empty() {
             bail!("Missing ciphertext.");
+        }
+
+        Ok(Self {
+            header,
+            ciphertext,
+            raw_header_aad: Some(bin_hdr.to_vec()),
+            #[cfg(feature = "pqc")]
+            pqc_signature: None,
+        })
+    }
+
+    /// Parse a v4 hardened container from bytes.
+    ///
+    /// V4 wire format (no MAGIC, no header_len):
+    /// `[version=4 (1)][header (49)][ciphertext (N)]`
+    pub fn from_bytes_v4(input: &[u8]) -> Result<Self> {
+        if input.len() < 1 + V4_HDR_LEN + 1 {
+            bail!("Input too short for v4 container ({} bytes).", input.len());
+        }
+        if input[0] != VERSION_HARDENED {
+            bail!("Not a v4 container (version byte = {}).", input[0]);
+        }
+
+        let bin_hdr = &input[1..1 + V4_HDR_LEN];
+        let flags = bin_hdr[0];
+        let pepper_required = (flags & 0x01) != 0;
+        let _compressed = (flags & 0x02) != 0; // used during open_v4
+        let mode_bits = (flags >> 2) & 0x03;
+        let aead_bits = (flags >> 4) & 0x03;
+
+        let mode = match mode_bits {
+            0 => "classic-trailing",
+            1 => "websafe-zw",
+            other => bail!("Unknown v4 mode bits: {}", other),
+        };
+        let aead = match aead_bits {
+            0 => "XChaCha20-Poly1305",
+            other => bail!("Unknown v4 AEAD bits: {}", other),
+        };
+
+        let m_cost_log2 = bin_hdr[1];
+        if m_cost_log2 > 31 {
+            bail!("Invalid m_cost_log2: {} (max 31).", m_cost_log2);
+        }
+        let m_cost_kib: u32 = 1 << m_cost_log2;
+        let t_cost = u16::from_le_bytes(bin_hdr[2..4].try_into().unwrap()) as u32;
+        let p_cost = bin_hdr[4] as u32;
+        let salt = &bin_hdr[5..21];
+        let nonce = &bin_hdr[21..45];
+        let plaintext_len = u32::from_le_bytes(bin_hdr[45..49].try_into().unwrap());
+
+        let header = Snow2Header {
+            magic: String::from_utf8(MAGIC.to_vec()).expect("MAGIC is valid utf8"),
+            version: VERSION_HARDENED,
+            mode: mode.to_string(),
+            kdf: crypto::KdfParams {
+                m_cost_kib,
+                t_cost,
+                p_cost,
+                out_len: 32, // implicit for v4
+            },
+            pepper_required,
+            salt_b64: STANDARD.encode(salt),
+            nonce_b64: STANDARD.encode(nonce),
+            aead: aead.to_string(),
+            plaintext_len: plaintext_len as u64,
+            #[cfg(feature = "pqc")]
+            pqc_kyber_pk_b64: None,
+            #[cfg(feature = "pqc")]
+            pqc_dilithium_pk_b64: None,
+        };
+
+        let ciphertext = input[1 + V4_HDR_LEN..].to_vec();
+        if ciphertext.is_empty() {
+            bail!("Missing ciphertext in v4 container.");
         }
 
         Ok(Self {
