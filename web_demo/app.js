@@ -34,12 +34,21 @@ function downloadBytes(filename, bytes) {
 }
 
 function generateCarrier(lines = 6000) {
+  const phrases = [
+    "the quick brown fox jumps over the lazy dog",
+    "nothing to see here, just ordinary text",
+    "a perfectly normal line of carrier text",
+    "some days the weather is sunny and warm",
+    "every great journey begins with a single step",
+    "the stars come out one by one at dusk",
+    "a watched pot never boils, they say",
+    "books lined the shelves from floor to ceiling",
+    "the river runs quietly through the valley",
+    "time flies when you are having fun",
+  ];
   const out = [];
-  out.push("SNOW2 web demo carrier. Many lines are required in this demo.");
-  out.push("Tip: use CLI for file-based carriers and classic-trailing mode.");
-  out.push("------------------------------------------------------------");
-  for (let i = 1; i <= lines; i++) {
-    out.push(`Carrier line ${String(i).padStart(5, "0")}: nothing to see here.`);
+  for (let i = 0; i < lines; i++) {
+    out.push(phrases[i % phrases.length]);
   }
   return out.join("\n");
 }
@@ -146,18 +155,35 @@ async function main() {
     downloadBytes("recovered.bin", bytes);
   });
 
-  $("clearBtn").addEventListener("click", () => {
+  function clearAll() {
     $("password").value = "";
     $("pepper").value = "";
     $("message").value = "";
+    $("carrier").value = "";
     $("outCarrier").value = "";
     $("extractCarrier").value = "";
     $("recoveredText").value = "";
     $("recoveredB64").value = "";
     $("pepperRequired").checked = false;
+    $("kdfMib").value = 64;
+    $("kdfIters").value = 3;
+    $("kdfPar").value = 1;
     recoveredB64 = null;
     status(embedStatus, "", "");
-    status(extractStatus, "ok", "Sensitive fields cleared.");
+    status(extractStatus, "", "");
+  }
+
+  $("clearAllBtn").addEventListener("click", () => {
+    clearAll();
+    status(embedStatus, "ok", "All fields cleared.");
+  });
+
+  $("clearExtractBtn").addEventListener("click", () => {
+    $("extractCarrier").value = "";
+    $("recoveredText").value = "";
+    $("recoveredB64").value = "";
+    recoveredB64 = null;
+    status(extractStatus, "ok", "Extraction fields cleared.");
   });
 
   // Pre-fill a carrier to make first use easy
