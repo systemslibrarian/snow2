@@ -60,7 +60,47 @@ function generateCarrier(lines = 6000) {
     "The river had frozen solid, forming a natural bridge across the gorge",
     "Children built an enormous snowman in the town square after school",
     "Warm cocoa and wool blankets made the blizzard outside almost welcome",
+    "Icicles hung from the eaves like rows of crystal daggers catching the light",
+    "The snow-capped peaks were visible for miles against the clear blue sky",
+    "A lone wolf howled somewhere far across the frozen wilderness at dusk",
+    "Every branch on every tree sagged under the weight of heavy wet snow",
+    "The thermometer read minus thirty but the sky had never looked so clear",
+    "Penguins huddled together for warmth on the windswept Antarctic shore",
+    "Beneath the ice, the lake still held liquid water teeming with life",
+    "Avalanche warnings kept the ski patrol busy all through the long weekend",
+    "The cabin chimney sent a thin plume of smoke into the silver winter air",
+    "Reindeer grazed on lichen they dug from beneath a thin crust of snow",
+    "Frost patterns on the glass looked like tiny fern leaves etched in crystal",
+    "The snowplow rumbled past at dawn, clearing the road for the morning commute",
+    "A pair of snowshoe hares darted across the clearing and vanished into brush",
+    "The ice road across the bay would only last another few weeks at most",
+    "Wind-driven snow piled into drifts taller than the fence along the property",
+    "Scientists drilled ice cores thousands of years old to study ancient climates",
+    "The dog curled up by the fire and watched snowflakes swirl past the window",
+    "Mountaineers pitched camp at base and waited for the storm to pass",
+    "A thick fog rolled in from the coast, turning every surface white with rime",
+    "The pond froze overnight, and by morning the children were skating on it",
+    "Sleigh bells echoed down the valley as the horse-drawn carriage rounded the bend",
+    "The blizzard knocked out power for three days across the northern counties",
+    "Maple syrup producers tapped their trees as the last snow began to melt",
+    "Snow geese flew south in long wavering lines against the grey November sky",
+    "The igloo kept its builders surprisingly warm despite the howling wind outside",
+    "Cross-country skiers followed the trail that wound through silent birch forests",
+    "The observatory dome was half-buried after the heaviest snowfall on record",
+    "A snowy owl perched motionless on a fence post, scanning the white fields",
+    "The frozen waterfall hung in mid-cascade, a sculpture of pale blue ice",
+    "Hot springs steamed in the cold air, surrounded by banks of untouched snow",
+    "The old lighthouse stood alone on the headland, wrapped in freezing sea spray",
+    "Caribou migrated hundreds of miles across the tundra before the deep freeze set in",
+    "Every footstep crunched loudly in the silence of the snow-covered forest",
+    "The meteorologist predicted another six inches by tomorrow afternoon",
+    "A single set of fox tracks crossed the meadow and disappeared into the pines",
   ];
+  // Shuffle for variety each time
+  for (let i = phrases.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [phrases[i], phrases[j]] = [phrases[j], phrases[i]];
+  }
   const out = [];
   for (let i = 0; i < lines; i++) {
     out.push(phrases[i % phrases.length]);
