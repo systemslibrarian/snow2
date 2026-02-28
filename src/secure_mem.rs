@@ -3,10 +3,6 @@
 //! On native targets: uses libc for mlock/munlock and guard pages.
 //! On WASM: falls back to a simple zeroize-on-drop Vec wrapper (no mlock available).
 
-use anyhow::Result;
-use std::ops::{Deref, DerefMut};
-use zeroize::Zeroize;
-
 // ── Native implementation (Linux / macOS / etc.) ──────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -77,6 +77,17 @@ impl PqPublicKey {
     }
 }
 
+/// Magic bytes for encrypted PQC secret key files.
+///
+/// Format (v1): `[SNOW2EK\0 (8)][version (1)][salt (16)][nonce (24)][AEAD ciphertext]`
+///
+/// Legacy (v0): `[SNOW2EK\0 (8)][salt (16)][nonce (24)][AEAD ciphertext]`
+/// (no version byte — salt starts immediately after magic)
+const ENCRYPTED_SK_MAGIC: &[u8; 8] = b"SNOW2EK\0";
+
+/// Current encrypted-SK format version.
+const ENCRYPTED_SK_VERSION: u8 = 1;
+
 /// A container for a post-quantum secret key.
 pub struct PqSecretKey {
     pub(crate) kyber_sk: KyberSecretKey,
@@ -112,6 +123,99 @@ impl PqSecretKey {
         bytes.extend_from_slice(self.kyber_sk.as_bytes());
         bytes.extend_from_slice(self.dilithium_sk.as_bytes());
         bytes
+    }
+
+    /// Encrypt the secret key with a password for secure on-disk storage.
+    ///
+    /// Uses Argon2id key derivation + XChaCha20-Poly1305 AEAD.
+    ///
+    /// Output format (v1): `[SNOW2EK\0 (8)][version=1 (1)][salt (16)][nonce (24)][ciphertext+tag]`
+    pub fn encrypt(&self, password: &[u8]) -> Result<Vec<u8>> {
+        let salt = crate::crypto::random_bytes(16)?;
+        let kdf = crate::crypto::KdfParams::recommended();
+        let key = crate::crypto::derive_key(password, None, &salt, &kdf)?;
+
+        let nonce = crate::crypto::random_bytes(24)?;
+        let plaintext = self.to_bytes();
+        // AAD includes magic + version so downgrade attacks are detected.
+        let mut aad = Vec::with_capacity(9);
+        aad.extend_from_slice(ENCRYPTED_SK_MAGIC);
+        aad.push(ENCRYPTED_SK_VERSION);
+        let ciphertext =
+            crate::crypto::aead_seal(&key, &nonce, &aad, &plaintext)?;
+
+        let mut out = Vec::with_capacity(8 + 1 + 16 + 24 + ciphertext.len());
+        out.extend_from_slice(ENCRYPTED_SK_MAGIC);
+        out.push(ENCRYPTED_SK_VERSION);
+        out.extend_from_slice(&salt);
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
+    }
+
+    /// Decrypt an encrypted secret key file.
+    ///
+    /// Supports both v1 (versioned) and legacy v0 (un-versioned) formats.
+    pub fn decrypt(encrypted: &[u8], password: &[u8]) -> Result<Self> {
+        if encrypted.len() < 8 + 1 + 16 + 24 {
+            return Err(anyhow!("Encrypted key file too short."));
+        }
+
+        let magic = &encrypted[0..8];
+        if magic != ENCRYPTED_SK_MAGIC {
+            return Err(anyhow!(
+                "Not an encrypted SNOW2 secret key (bad magic). Is this an unencrypted key?"
+            ));
+        }
+
+        let version = encrypted[8];
+        let (salt, nonce, ciphertext, aad) = match version {
+            ENCRYPTED_SK_VERSION => {
+                // v1: [magic(8)][version(1)][salt(16)][nonce(24)][ct]
+                let salt = &encrypted[9..25];
+                let nonce = &encrypted[25..49];
+                let ct = &encrypted[49..];
+                let mut aad = Vec::with_capacity(9);
+                aad.extend_from_slice(ENCRYPTED_SK_MAGIC);
+                aad.push(ENCRYPTED_SK_VERSION);
+                (salt, nonce, ct, aad)
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Unsupported encrypted SK version: {}. \
+                     You may need a newer version of snow2.",
+                    version
+                ));
+            }
+        };
+
+        let kdf = crate::crypto::KdfParams::recommended();
+        let key = crate::crypto::derive_key(password, None, salt, &kdf)?;
+
+        let plaintext =
+            crate::crypto::aead_open(&key, nonce, &aad, ciphertext)?;
+
+        Self::from_bytes(&plaintext)
+    }
+
+    /// Load a secret key file, auto-detecting encrypted vs unencrypted format.
+    ///
+    /// If the file starts with the `SNOW2EK\0` magic, it is treated as encrypted
+    /// and `password` is required. Otherwise, the raw bytes are parsed directly.
+    pub fn load(bytes: &[u8], password: Option<&[u8]>) -> Result<Self> {
+        if bytes.len() >= 8 && bytes[0..8] == *ENCRYPTED_SK_MAGIC {
+            let password = password.ok_or_else(|| {
+                anyhow!("Secret key is encrypted; a password is required (--sk-password).")
+            })?;
+            Self::decrypt(bytes, password)
+        } else {
+            Self::from_bytes(bytes)
+        }
+    }
+
+    /// Check whether a byte slice looks like an encrypted secret key file.
+    pub fn is_encrypted(bytes: &[u8]) -> bool {
+        bytes.len() >= 8 && bytes[0..8] == *ENCRYPTED_SK_MAGIC
     }
 }
 

@@ -4,12 +4,48 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     Key, XChaCha20Poly1305, XNonce,
 };
+use hkdf::Hkdf;
+use sha2::Sha256;
 use crate::secure_mem::SecureVec;
 use serde::{Deserialize, Serialize};
-use zeroize::{Zeroizing};
+use zeroize::{Zeroize, Zeroizing};
 
 /// A key that will be zeroized on drop.
 pub type ZeroizingKey = Zeroizing<[u8; 32]>;
+
+// ── Extraction-side KDF safety bounds ─────────────────────────────────────
+//
+// These constants define the maximum Argon2id parameters an extractor will
+// accept from an untrusted container header. Without these bounds, a
+// malicious embedder could set m_cost_kib = u32::MAX and force the
+// extractor to allocate ~4 TiB of RAM, causing denial-of-service.
+//
+// The bounds are deliberately generous (well beyond any reasonable
+// interactive use-case) so that legitimate containers are never rejected.
+// They exist purely to prevent abuse.
+
+/// Maximum Argon2 memory cost accepted during extraction: 4 GiB.
+pub const KDF_MAX_M_COST_KIB: u32 = 4 * 1024 * 1024; // 4 GiB in KiB
+
+/// Maximum Argon2 time cost accepted during extraction: 64 iterations.
+pub const KDF_MAX_T_COST: u32 = 64;
+
+/// Maximum Argon2 parallelism accepted during extraction: 16 lanes.
+pub const KDF_MAX_P_COST: u32 = 16;
+
+/// The only supported derived-key length. Fixed to 32 bytes
+/// (XChaCha20-Poly1305 key size).
+pub const KDF_REQUIRED_OUT_LEN: u32 = 32;
+
+/// Minimum Argon2 memory cost: 8 MiB in KiB (prevents trivially weak KDF).
+pub const KDF_MIN_M_COST_KIB: u32 = 8 * 1024;
+
+/// Minimum Argon2 time cost: 1 iteration.
+pub const KDF_MIN_T_COST: u32 = 1;
+
+/// HKDF info labels for domain-separated key expansion.
+const HKDF_LABEL_AEAD_KEY: &[u8] = b"snow2/aead-key";
+const HKDF_LABEL_PEPPER_BINDING: &[u8] = b"snow2/pepper-binding";
 
 /// Argon2id parameters (authenticated in the container header).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,18 +61,89 @@ pub struct KdfParams {
 }
 
 impl KdfParams {
-    /// Reasonable defaults for interactive use in 2026.
+    /// Reasonable defaults for interactive use.
     pub fn recommended() -> Self {
         Self {
-            // 64 MiB
-            m_cost_kib: 64 * 1024,
-            // 3 iterations
+            m_cost_kib: 64 * 1024, // 64 MiB
             t_cost: 3,
-            // 1 lane
             p_cost: 1,
-            // 32 bytes for XChaCha20-Poly1305 key
             out_len: 32,
         }
+    }
+
+    /// Hardened profile: stronger defaults for high-value secrets.
+    ///
+    /// Uses more memory and iterations than `recommended()`. Suitable for
+    /// protecting long-term secrets where a few extra seconds of KDF time
+    /// are acceptable.
+    pub fn hardened() -> Self {
+        Self {
+            m_cost_kib: 256 * 1024, // 256 MiB
+            t_cost: 4,
+            p_cost: 1,
+            out_len: 32,
+        }
+    }
+
+    /// Validate that these parameters fall within the extraction-side safety
+    /// bounds. Returns `Ok(())` if acceptable, or an error describing which
+    /// bound was violated.
+    ///
+    /// This **must** be called before using untrusted KDF parameters read
+    /// from a container header.
+    pub fn validate_extraction_bounds(&self) -> Result<()> {
+        if self.out_len != KDF_REQUIRED_OUT_LEN {
+            bail!(
+                "Unsupported KDF output length: {} (expected {}).",
+                self.out_len,
+                KDF_REQUIRED_OUT_LEN
+            );
+        }
+        if self.m_cost_kib > KDF_MAX_M_COST_KIB {
+            bail!(
+                "KDF memory cost too high: {} KiB (max {} KiB / {} GiB). \
+                 This container may be malicious.",
+                self.m_cost_kib,
+                KDF_MAX_M_COST_KIB,
+                KDF_MAX_M_COST_KIB / (1024 * 1024)
+            );
+        }
+        if self.m_cost_kib < KDF_MIN_M_COST_KIB {
+            bail!(
+                "KDF memory cost too low: {} KiB (min {} KiB / {} MiB). \
+                 This container may have been created with dangerously weak settings.",
+                self.m_cost_kib,
+                KDF_MIN_M_COST_KIB,
+                KDF_MIN_M_COST_KIB / 1024
+            );
+        }
+        if self.t_cost > KDF_MAX_T_COST {
+            bail!(
+                "KDF time cost too high: {} (max {}). \
+                 This container may be malicious.",
+                self.t_cost,
+                KDF_MAX_T_COST
+            );
+        }
+        if self.t_cost < KDF_MIN_T_COST {
+            bail!(
+                "KDF time cost too low: {} (min {}).",
+                self.t_cost,
+                KDF_MIN_T_COST
+            );
+        }
+        if self.p_cost > KDF_MAX_P_COST {
+            bail!(
+                "KDF parallelism too high: {} (max {}). \
+                 This container may be malicious.",
+                self.p_cost,
+                KDF_MAX_P_COST
+            );
+        }
+        if self.p_cost < 1 {
+            bail!("KDF parallelism must be at least 1.");
+        }
+        Ok(())
     }
 }
 
@@ -47,10 +154,22 @@ pub fn random_bytes(len: usize) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Derive an AEAD key using Argon2id from:
-/// - password (required)
-/// - optional pepper (not stored; extra "Signal Key")
-/// - salt (per-message random)
+/// Derive an AEAD key using Argon2id with HKDF domain separation.
+///
+/// Two-stage derivation:
+/// 1. **Argon2id**: derives a 32-byte master secret from `password` + `salt`
+/// 2. **HKDF-SHA256 Expand**: domain-separates the master secret into the
+///    AEAD key, optionally binding the pepper as HKDF salt.
+///
+/// This structure avoids ambiguity from concatenating password and pepper
+/// directly, and makes each derived key's purpose explicit via HKDF labels.
+///
+/// # Arguments
+///
+/// - `password` — user-supplied password (must not be empty)
+/// - `pepper` — optional second secret ("signal key"), not stored in the container
+/// - `salt` — per-message random salt (at least 8 bytes)
+/// - `params` — Argon2id tuning parameters
 pub fn derive_key(
     password: &[u8],
     pepper: Option<&[u8]>,
@@ -65,16 +184,6 @@ pub fn derive_key(
     }
     if params.out_len != 32 {
         bail!("Unsupported out_len {} (expected 32).", params.out_len);
-    }
-
-    // password || 0x00 || pepper (if present)
-    let mut pw = Zeroizing::new(Vec::with_capacity(
-        password.len() + 1 + pepper.map(|p| p.len()).unwrap_or(0),
-    ));
-    pw.extend_from_slice(password);
-    pw.push(0u8);
-    if let Some(p) = pepper {
-        pw.extend_from_slice(p);
     }
 
     let out_len_usize: usize = params
@@ -92,12 +201,39 @@ pub fn derive_key(
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
 
-    let mut out = Zeroizing::new([0u8; 32]);
+    // Stage 1: Argon2id(password, salt) -> master_secret
+    let mut master_secret = Zeroizing::new([0u8; 32]);
     argon2
-        .hash_password_into(&pw, salt, &mut *out)
+        .hash_password_into(password, salt, &mut *master_secret)
         .map_err(|e| anyhow!("Argon2id derive failed: {:?}", e))?;
 
-    Ok(out)
+    // Stage 2: HKDF-SHA256 domain-separated expansion
+    //
+    // HKDF salt = pepper (if present), binding the pepper cryptographically
+    // without concatenation ambiguity.
+    // HKDF IKM  = master_secret from Argon2id
+    // HKDF info = domain label "snow2/aead-key"
+    //
+    // If pepper is provided, we also mix in a pepper-binding label to create
+    // a truly distinct derivation path.
+    let hkdf_salt = pepper.unwrap_or(b"");
+    let hkdf_info = if pepper.is_some() {
+        // Concatenate labels: "snow2/aead-key" + "snow2/pepper-binding"
+        // This ensures pepper presence changes the derivation path entirely.
+        let mut info = Vec::with_capacity(HKDF_LABEL_AEAD_KEY.len() + HKDF_LABEL_PEPPER_BINDING.len());
+        info.extend_from_slice(HKDF_LABEL_AEAD_KEY);
+        info.extend_from_slice(HKDF_LABEL_PEPPER_BINDING);
+        info
+    } else {
+        HKDF_LABEL_AEAD_KEY.to_vec()
+    };
+
+    let hk = Hkdf::<Sha256>::new(Some(hkdf_salt), &*master_secret);
+    let mut aead_key = ZeroizingKey::new([0u8; 32]);
+    hk.expand(&hkdf_info, &mut *aead_key)
+        .map_err(|e| anyhow!("HKDF expansion failed: {}", e))?;
+
+    Ok(aead_key)
 }
 
 /// AEAD seal using XChaCha20-Poly1305.
@@ -135,7 +271,7 @@ pub fn aead_open(
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
     let n = XNonce::from_slice(nonce);
 
-    let pt = cipher
+    let mut pt = cipher
         .decrypt(n, Payload { msg: ciphertext, aad })
         .map_err(|e| {
             anyhow!(
@@ -143,5 +279,8 @@ pub fn aead_open(
                 e
             )
         })?;
-    SecureVec::from_slice(&pt)
+    let sv = SecureVec::from_slice(&pt);
+    // Zeroize the intermediate Vec to avoid leaving plaintext in unlocked memory.
+    pt.zeroize();
+    sv
 }

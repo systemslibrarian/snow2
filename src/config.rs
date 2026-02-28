@@ -55,4 +55,17 @@ impl EmbedSecurityOptions {
             ..Default::default()
         }
     }
+
+    /// Hardened profile: stronger KDF + mandatory pepper.
+    ///
+    /// Intended for protecting high-value or long-lived secrets where a
+    /// few extra seconds of KDF time are acceptable.
+    pub fn hardened() -> Self {
+        Self {
+            kdf: KdfParams::hardened(),
+            pepper_required: true,
+            #[cfg(feature = "pqc")]
+            pqc_enabled: false,
+        }
+    }
 }
