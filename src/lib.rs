@@ -1,17 +1,24 @@
 //! SNOW2 core library.
 //!
 //! This crate provides the core primitives for SNOW2:
-//! - Versioned container format (metadata + ciphertext)
+//! - Versioned container format (v1 classic, v2 PQC)
 //! - Modern crypto (Argon2id + XChaCha20-Poly1305)
-//! - Steganography embedding/extraction modes
-//! - Security policy config (KDF tuning + pepper-required policy)
+//! - Optional hybrid post-quantum crypto (Kyber1024 + Dilithium5) via `pqc` feature
+//! - Steganography embedding/extraction modes (classic-trailing, websafe-zw)
+//! - Security policy config (KDF tuning, pepper-required policy)
+//! - Secure memory handling (mlock + guard pages on native, zeroize on WASM)
 
 pub mod config;
 pub mod container;
 pub mod crypto;
 pub mod stego;
+pub mod secure_mem;
+
+#[cfg(feature = "pqc")]
+pub mod pqc;
 
 use anyhow::{bail, Result};
+use secure_mem::SecureVec;
 
 /// Supported embedding/extraction modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,8 +55,8 @@ pub fn embed(
     mode: Mode,
     carrier_text: &str,
     payload: &[u8],
-    password: &str,
-    pepper: Option<&str>,
+    password: &[u8],
+    pepper: Option<&[u8]>,
 ) -> Result<String> {
     // Step 1: containerize (encrypt+auth)
     let container = container::Snow2Container::seal(payload, password, pepper, mode)?;
@@ -69,11 +76,12 @@ pub fn embed_with_options(
     mode: Mode,
     carrier_text: &str,
     payload: &[u8],
-    password: &str,
-    pepper: Option<&str>,
-    opts: &config::EmbedSecurityOptions,
+    password: &[u8],
+    pepper: Option<&[u8]>,
+    opts: &config::EmbedOptions,
 ) -> Result<String> {
-    let container = container::Snow2Container::seal_with_options(payload, password, pepper, mode, opts)?;
+    let container =
+        container::Snow2Container::seal_with_options(payload, password, pepper, mode, opts)?;
     let bits = stego::bytes_to_bits(container.to_bytes()?);
 
     match mode {
@@ -92,9 +100,10 @@ pub fn embed_with_options(
 pub fn extract(
     mode: Mode,
     carrier_text: &str,
-    password: &str,
-    pepper: Option<&str>,
-) -> Result<Vec<u8>> {
+    password: &[u8],
+    pepper: Option<&[u8]>,
+    pqc_sk: Option<&[u8]>,
+) -> Result<SecureVec> {
     // Step 1: extract bits
     let bits = match mode {
         Mode::ClassicTrailing => stego::classic_trailing::extract_bits(carrier_text)?,
@@ -104,9 +113,7 @@ pub fn extract(
     // Step 2: bits -> bytes
     let container_bytes = stego::bits_to_bytes(&bits)?;
 
-    // Step 3: parse container
+    // Step 3: open container
     let container = container::Snow2Container::from_bytes(&container_bytes)?;
-
-    // Step 4: decrypt+auth
-    container.open(password, pepper)
+    container.open(password, pepper, pqc_sk)
 }

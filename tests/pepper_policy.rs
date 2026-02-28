@@ -1,4 +1,4 @@
-use snow2::{config::EmbedSecurityOptions, crypto::KdfParams, Mode};
+use snow2::{config::{EmbedOptions, EmbedSecurityOptions}, crypto::KdfParams, Mode};
 
 fn big_carrier(lines: usize) -> String {
     (0..lines)
@@ -12,14 +12,15 @@ fn pepper_required_blocks_missing_pepper_on_embed() {
     let carrier = big_carrier(6000);
     let payload = b"hello";
 
-    let mut opts = EmbedSecurityOptions::default();
-    opts.pepper_required = true;
+    let mut sec = EmbedSecurityOptions::default();
+    sec.pepper_required = true;
+    let opts = EmbedOptions { security: sec, ..Default::default() };
 
     let err = snow2::embed_with_options(
         Mode::ClassicTrailing,
         &carrier,
         payload,
-        "pw",
+        b"pw",
         None, // missing pepper
         &opts,
     )
@@ -37,15 +38,16 @@ fn pepper_required_blocks_missing_pepper_on_extract() {
     let carrier = big_carrier(6000);
     let payload = b"hello";
 
-    let mut opts = EmbedSecurityOptions::default();
-    opts.pepper_required = true;
+    let mut sec = EmbedSecurityOptions::default();
+    sec.pepper_required = true;
+    let opts = EmbedOptions { security: sec, ..Default::default() };
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
         &carrier,
         payload,
-        "pw",
-        Some("signal"),
+        b"pw",
+        Some(b"signal" as &[u8]),
         &opts,
     )
     .expect("embed should succeed");
@@ -53,8 +55,9 @@ fn pepper_required_blocks_missing_pepper_on_extract() {
     let err = snow2::extract(
         Mode::ClassicTrailing,
         &out_carrier,
-        "pw",
+        b"pw",
         None, // missing pepper at extract time
+        None,
     )
     .unwrap_err();
 
@@ -70,23 +73,22 @@ fn kdf_tuning_roundtrip_still_works() {
     let carrier = big_carrier(8000);
     let payload = b"kdf tuning test";
 
-    let mut opts = EmbedSecurityOptions::default();
-    opts.pepper_required = true;
-
-    // Example stronger KDF params
-    opts.kdf = KdfParams {
+    let mut sec = EmbedSecurityOptions::default();
+    sec.pepper_required = true;
+    sec.kdf = KdfParams {
         m_cost_kib: 128 * 1024, // 128 MiB
         t_cost: 4,
         p_cost: 1,
         out_len: 32,
     };
+    let opts = EmbedOptions { security: sec, ..Default::default() };
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
         &carrier,
         payload,
-        "pw",
-        Some("signal"),
+        b"pw",
+        Some(b"signal" as &[u8]),
         &opts,
     )
     .expect("embed should succeed");
@@ -94,10 +96,11 @@ fn kdf_tuning_roundtrip_still_works() {
     let recovered = snow2::extract(
         Mode::ClassicTrailing,
         &out_carrier,
-        "pw",
-        Some("signal"),
+        b"pw",
+        Some(b"signal" as &[u8]),
+        None,
     )
     .expect("extract should succeed");
 
-    assert_eq!(recovered, payload);
+    assert_eq!(&*recovered, payload);
 }
