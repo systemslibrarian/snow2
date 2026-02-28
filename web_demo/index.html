@@ -19,11 +19,11 @@
     <section class="card quickstart">
       <h2>Try it in 30 seconds</h2>
       <ol>
-        <li>Type a secret message below (e.g. &ldquo;Meet at 8pm&rdquo;).</li>
-        <li>Set a password above (stronger = slower but safer).</li>
-        <li>Click <b>Embed &rarr;</b> &mdash; the generated text looks completely normal!</li>
-        <li>Copy it and paste it somewhere (email, notes app, anywhere).</li>
-        <li>Later: paste it back here + same password &rarr; <b>Extract</b> to read your message.</li>
+        <li>Enter a password in <b>Security Settings</b> below.</li>
+        <li>Type a secret message (e.g. &ldquo;Meet at 8pm&rdquo;).</li>
+        <li>Click <b>Encrypt &amp; Hide</b> &mdash; your message is encrypted and hidden inside normal-looking text!</li>
+        <li>Copy the output and send it anywhere (email, notes app, chat).</li>
+        <li>To read it later: paste it into <b>Step 2: Decrypt</b> with the same password &rarr; your message appears.</li>
       </ol>
     </section>
 
@@ -79,25 +79,25 @@
     </section>
 
     <section class="card">
-      <h2>Embed</h2>
+      <h2>Step 1: Encrypt &amp; Hide</h2>
       <label>
-        Message to hide
-        <textarea id="message" rows="4" placeholder="Type a message to hide..."></textarea>
+        Your secret message
+        <textarea id="message" rows="4" placeholder="Type your secret message here..."></textarea>
       </label>
 
       <label>
-        Text to hide your message in (carrier)
+        Cover text (your message will be hidden inside this)
         <textarea id="carrier" rows="10" placeholder="Paste any text here, or click 'Generate sample text' below..."></textarea>
       </label>
 
       <div class="row">
         <button id="genCarrier">Generate sample text</button>
-        <button id="embedBtn">Embed →</button>
+        <button id="embedBtn">Encrypt &amp; Hide</button>
         <button id="clearAllBtn">Clear all</button>
       </div>
 
       <label>
-        Output text with hidden message
+        Output &mdash; looks normal, but your encrypted message is hidden inside
         <textarea id="outCarrier" rows="10" readonly></textarea>
       </label>
 
@@ -111,36 +111,35 @@
     </section>
 
     <section class="card">
-      <h2>Extract</h2>
+      <h2>Step 2: Decrypt &amp; Reveal</h2>
       <p class="note">
-        To recover a hidden message: enter the <b>same password</b> (and pepper, if used) in
-        <b>Security Settings</b> above, paste the text below, and click <b>Extract</b>.
+        Paste the text containing a hidden message below, enter the <b>same password</b>
+        (and pepper, if used) in <b>Security Settings</b> above, then click <b>Decrypt</b>.
       </p>
 
       <label>
-        Text containing hidden message (carrier)
-        <textarea id="extractCarrier" rows="10" placeholder="Paste the text containing a hidden message here..."></textarea>
+        Paste text containing a hidden message
+        <textarea id="extractCarrier" rows="10" placeholder="Paste the text you received here..."></textarea>
       </label>
 
       <div class="row">
-        <button id="extractBtn">Extract →</button>
+        <button id="extractBtn">Decrypt &amp; Reveal</button>
       </div>
 
       <label>
-        Recovered (UTF-8 if possible)
+        Your decrypted message
         <textarea id="recoveredText" rows="6" readonly></textarea>
       </label>
 
       <div class="row">
-        <button id="copyRecovered">Copy to clipboard</button>
         <button id="downloadRecovered">Download file</button>
-        <button id="clearExtractBtn">Clear extraction fields</button>
+        <button id="clearExtractBtn">Clear</button>
       </div>
 
-      <label>
-        Recovered (base64)
+      <details class="b64-details">
+        <summary>Raw data (base64)</summary>
         <textarea id="recoveredB64" rows="4" readonly></textarea>
-      </label>
+      </details>
 
       <div id="extractStatus" class="status"></div>
     </section>
