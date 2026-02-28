@@ -19,11 +19,15 @@ use anyhow::{Context, Result};
 /// Write data to a file with optional security hardening.
 ///
 /// When `sensitive` is true:
-/// - On Unix: sets file permissions to **0o600** (owner read/write only)
-/// - Uses atomic write (temp file + rename) to prevent partial-write corruption
+/// - On Unix: creates the temp file with **0o600** (owner read/write only) from
+///   the start via `OpenOptionsExt::mode()`, so there is no window of insecure
+///   access between creation and permission-set.
+/// - Uses `create_new(true)` to prevent race-condition overwrites.
+/// - Atomically renames the temp file into place.
 ///
 /// When `sensitive` is false:
-/// - Still performs atomic write, but does not restrict permissions
+/// - Still performs atomic write with `create_new(true)`, but does not restrict
+///   permissions.
 pub fn write_secure(path: &str, data: &[u8], sensitive: bool) -> Result<()> {
     // Use random suffix to avoid predictable temp-file names and collisions.
     let random_suffix = {
@@ -34,20 +38,40 @@ pub fn write_secure(path: &str, data: &[u8], sensitive: bool) -> Result<()> {
     };
     let temp = format!("{}.tmp.{}", path, random_suffix);
 
-    // Write to temp file first
-    std::fs::write(&temp, data)
-        .with_context(|| format!("write temp file: {}", temp))?;
-
-    // Harden permissions BEFORE rename (prevents window of insecure access)
+    // Write to temp file.
+    // For sensitive files on Unix, create with restricted permissions (0o600)
+    // from the start, preventing any window of insecure access.
     if sensitive {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o600);
-            if let Err(e) = std::fs::set_permissions(&temp, perms) {
-                let _ = std::fs::remove_file(&temp); // clean up on failure
-                return Err(e).with_context(|| format!("set permissions 0o600 on {}", temp));
+            use std::os::unix::fs::OpenOptionsExt;
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)    // fail if already exists — prevents race
+                .mode(0o600)         // owner read/write only from creation
+                .open(&temp)
+                .with_context(|| format!("create temp file (sensitive): {}", temp))?;
+            if let Err(e) = file.write_all(data) {
+                let _ = std::fs::remove_file(&temp);
+                return Err(e).with_context(|| format!("write temp file: {}", temp));
             }
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&temp, data)
+                .with_context(|| format!("write temp file: {}", temp))?;
+        }
+    } else {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)    // fail if already exists — prevents race
+            .open(&temp)
+            .with_context(|| format!("create temp file: {}", temp))?;
+        if let Err(e) = file.write_all(data) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(e).with_context(|| format!("write temp file: {}", temp));
         }
     }
 
