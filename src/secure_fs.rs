@@ -25,7 +25,14 @@ use anyhow::{Context, Result};
 /// When `sensitive` is false:
 /// - Still performs atomic write, but does not restrict permissions
 pub fn write_secure(path: &str, data: &[u8], sensitive: bool) -> Result<()> {
-    let temp = format!("{}.tmp.{}", path, std::process::id());
+    // Use random suffix to avoid predictable temp-file names and collisions.
+    let random_suffix = {
+        let mut buf = [0u8; 8];
+        getrandom::getrandom(&mut buf)
+            .map_err(|e| anyhow::anyhow!("getrandom for temp suffix: {:?}", e))?;
+        buf.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    };
+    let temp = format!("{}.tmp.{}", path, random_suffix);
 
     // Write to temp file first
     std::fs::write(&temp, data)

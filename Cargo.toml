@@ -20,7 +20,6 @@ clap = { version = "4.5", features = ["derive"] }
 # Crypto
 argon2 = "0.5"
 chacha20poly1305 = "0.10"
-rand_core = "0.6"
 getrandom = "0.2"
 
 # Encoding
@@ -31,7 +30,6 @@ zeroize = { version = "1.7", features = ["alloc"] }
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
 
 # Serialization for container header
 serde = { version = "1.0", features = ["derive"] }
@@ -43,7 +41,6 @@ crc32fast = "1.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = "0.2.182"
-memsec = "0.7.0"
 rpassword = "7.3"
 atty = "0.2"
 

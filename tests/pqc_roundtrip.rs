@@ -88,3 +88,90 @@ fn test_pqc_roundtrip() {
 
     let _ = fs::remove_dir_all(dir);
 }
+
+// ── Malformed PQC key tests ──────────────────────────────────────────
+
+#[test]
+fn test_pqc_public_key_rejects_wrong_size() {
+    let short = vec![0u8; 100];
+    let err = PqPublicKey::from_bytes(&short).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("Invalid PQC public key length"),
+        "expected size rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn test_pqc_secret_key_rejects_wrong_size() {
+    let short = vec![0u8; 100];
+    let err = PqSecretKey::from_bytes(&short).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("Invalid PQC secret key length"),
+        "expected size rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn test_pqc_secret_key_rejects_empty() {
+    let err = PqSecretKey::from_bytes(&[]).unwrap_err();
+    assert!(format!("{err:#}").contains("Invalid PQC secret key length"));
+}
+
+#[test]
+fn test_pqc_encrypted_key_rejects_bad_magic() {
+    let garbage = b"NOT_SNOW_ENCRYPTED_KEY_FILE_CONTENTS_HERE_1234567890";
+    assert!(!PqSecretKey::is_encrypted(garbage));
+    let err = PqSecretKey::from_bytes(garbage).unwrap_err();
+    assert!(format!("{err:#}").contains("Invalid PQC secret key length"));
+}
+
+#[test]
+fn test_pqc_encrypted_key_rejects_truncated() {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"SNOW2EK\0");
+    data.push(1); // version
+    data.extend_from_slice(&[0u8; 10]); // too short
+
+    assert!(PqSecretKey::is_encrypted(&data));
+    let err = PqSecretKey::decrypt(&data, b"password").unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.to_lowercase().contains("too short") || msg.to_lowercase().contains("decrypt"),
+        "expected truncation rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn test_pqc_encrypted_key_rejects_wrong_password() {
+    let (_pk, sk) = snow2::pqc::keypair();
+    let encrypted = sk.encrypt(b"correct_password").unwrap();
+
+    let err = PqSecretKey::decrypt(&encrypted, b"wrong_password").unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.to_lowercase().contains("decrypt") || msg.to_lowercase().contains("auth"),
+        "expected auth failure, got: {msg}"
+    );
+}
+
+#[test]
+fn test_pqc_encrypted_key_roundtrip() {
+    let (_pk, sk) = snow2::pqc::keypair();
+    let original_bytes = sk.to_bytes();
+
+    let encrypted = sk.encrypt(b"my_password").unwrap();
+    assert!(PqSecretKey::is_encrypted(&encrypted));
+
+    let decrypted = PqSecretKey::decrypt(&encrypted, b"my_password").unwrap();
+    assert_eq!(original_bytes, decrypted.to_bytes());
+}
+
+#[test]
+fn test_pqc_to_zeroizing_bytes() {
+    let (_pk, sk) = snow2::pqc::keypair();
+    let plain = sk.to_bytes();
+    let zeroizing = sk.to_zeroizing_bytes();
+    assert_eq!(&plain, &*zeroizing, "zeroizing_bytes should match to_bytes");
+}
