@@ -16,6 +16,17 @@
   </header>
 
   <main>
+    <section class="card quickstart">
+      <h2>Try it in 30 seconds</h2>
+      <ol>
+        <li>Type a secret message below (e.g. &ldquo;Meet at 8pm&rdquo;).</li>
+        <li>Set a password above (stronger = slower but safer).</li>
+        <li>Click <b>Embed &rarr;</b> &mdash; the generated text looks completely normal!</li>
+        <li>Copy it and paste it somewhere (email, notes app, anywhere).</li>
+        <li>Later: paste it back here + same password &rarr; <b>Extract</b> to read your message.</li>
+      </ol>
+    </section>
+
     <section class="card">
       <h2>Security settings</h2>
 
@@ -93,6 +104,7 @@
       <div class="row">
         <button id="copyCarrier">Copy to clipboard</button>
         <button id="downloadCarrier">Download file</button>
+        <button id="toggleZw" class="toggle-zw">Show hidden markers</button>
       </div>
 
       <div id="embedStatus" class="status"></div>
@@ -139,8 +151,13 @@
         SNOW2 is inspired by Matthew Kwan’s original SNOW — a clever, educational demo of whitespace steganography + encryption.
         This web demo is for learning and testing. Don’t treat browsers as a security boundary.
       </p>
-          </section>
+    </section>
   </main>
+
+  <footer>
+    Full CLI version, classic trailing mode, post-quantum option &rarr;
+    <a href="https://github.com/systemslibrarian/snow2" target="_blank" rel="noopener">GitHub repo</a>
+  </footer>
 
   <script type="module" src="./app.js"></script>
 </body>
