@@ -87,6 +87,27 @@ button:hover { border-color: var(--accent); }
 
 .grid.kdf { grid-template-columns: repeat(3, 1fr); }
 
+.kdf-details {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.kdf-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.kdf-details[open] summary {
+  margin-bottom: 4px;
+}
+
+.kdf-note {
+  margin-bottom: 10px;
+}
+
 .checkbox {
   grid-column: 1 / -1;
   display: flex;
