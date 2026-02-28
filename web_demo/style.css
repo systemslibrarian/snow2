@@ -202,3 +202,33 @@ footer a {
 }
 
 footer a:hover { text-decoration: underline; }
+
+/* Password show/hide toggle */
+.pw-wrap {
+  display: flex;
+  gap: 0;
+  margin-top: 6px;
+}
+
+.pw-wrap input {
+  margin-top: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  flex: 1;
+}
+
+.pw-toggle {
+  margin-top: 0;
+  width: auto !important;
+  flex: 0 0 auto;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  padding: 10px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pw-toggle:hover { color: var(--accent); border-color: var(--accent); }

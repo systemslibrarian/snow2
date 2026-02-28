@@ -109,13 +109,28 @@ function generateCarrier(lines = 6000) {
 }
 
 function getSecurityInputs() {
-  const password = $("password").value;
-  const pepperRaw = $("pepper").value;
+  // Prefer decrypt-section fields if they have content, else fall back to main fields
+  const password = $("extractPassword").value || $("password").value;
+  const pepperRaw = $("extractPepper").value || $("pepper").value;
   const pepper = pepperRaw.length ? pepperRaw : null;
 
   const pepperRequired = $("pepperRequired").checked;
 
   // Clamp to browser-safe ranges (matches WASM-side limits)
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const kdfMib  = clamp(Number($("kdfMib").value  || 64), 8, 128);
+  const kdfIters = clamp(Number($("kdfIters").value || 3), 1, 8);
+  const kdfPar  = clamp(Number($("kdfPar").value   || 1), 1, 4);
+
+  return { password, pepper, pepperRequired, kdfMib, kdfIters, kdfPar };
+}
+
+function getEmbedSecurityInputs() {
+  const password = $("password").value;
+  const pepperRaw = $("pepper").value;
+  const pepper = pepperRaw.length ? pepperRaw : null;
+  const pepperRequired = $("pepperRequired").checked;
+
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const kdfMib  = clamp(Number($("kdfMib").value  || 64), 8, 128);
   const kdfIters = clamp(Number($("kdfIters").value || 3), 1, 8);
@@ -166,7 +181,7 @@ async function main() {
     try {
       status(embedStatus, "", "Encrypting & hiding…");
 
-      const { password, pepper, pepperRequired, kdfMib, kdfIters, kdfPar } = getSecurityInputs();
+      const { password, pepper, pepperRequired, kdfMib, kdfIters, kdfPar } = getEmbedSecurityInputs();
       const message = $("message").value;
       const carrier = $("carrier").value;
 
@@ -241,7 +256,7 @@ async function main() {
       const { password, pepper } = getSecurityInputs();
       const carrier = $("extractCarrier").value;
 
-      if (!password) throw new Error("Password is required — enter the same password used to encrypt (in Security Settings above).");
+      if (!password) throw new Error("Password is required — enter the same password used to encrypt.");
       if (!carrier.trim()) throw new Error("Paste the text containing the hidden message above.");
 
       const res = extract_websafe_zw(carrier, password, pepper);
@@ -272,6 +287,8 @@ async function main() {
   function clearAll() {
     $("password").value = "";
     $("pepper").value = "";
+    $("extractPassword").value = "";
+    $("extractPepper").value = "";
     $("message").value = "";
     $("carrier").value = "";
     $("outCarrier").value = "";
@@ -299,6 +316,10 @@ async function main() {
     $("extractCarrier").value = "";
     $("recoveredText").value = "";
     $("recoveredB64").value = "";
+    $("extractPassword").value = "";
+    $("extractPepper").value = "";
+    $("password").value = "";
+    $("pepper").value = "";
     recoveredB64 = null;
     status(extractStatus, "ok", "Cleared.");
   });
@@ -328,8 +349,62 @@ async function main() {
     zwVisible = !zwVisible;
   });
 
-  // Reset toggle state when new embed happens
-  const origEmbedClick = $("embedBtn").onclick;
+  // --- File upload for decrypt ---
+  $("uploadFileBtn").addEventListener("click", () => {
+    $("fileInput").click();
+  });
+
+  $("fileInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      $("extractCarrier").value = reader.result;
+      status(extractStatus, "ok", `Loaded "${file.name}" (${reader.result.length.toLocaleString()} chars). Enter password and click Decrypt.`);
+    };
+    reader.onerror = () => {
+      status(extractStatus, "err", "Failed to read file: " + reader.error);
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-selected
+    e.target.value = "";
+  });
+
+  // --- Password show/hide toggles ---
+  // Paired fields: toggling one also toggles its sync partner
+  const pwPairs = { password: "extractPassword", extractPassword: "password", pepper: "extractPepper", extractPepper: "pepper" };
+  document.querySelectorAll(".pw-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const input = $(btn.dataset.target);
+      if (!input) return;
+      const newType = input.type === "password" ? "text" : "password";
+      const newLabel = newType === "text" ? "Hide" : "Show";
+      input.type = newType;
+      btn.textContent = newLabel;
+      // Sync paired field's type + toggle label
+      const partnerId = pwPairs[btn.dataset.target];
+      if (partnerId) {
+        const partner = $(partnerId);
+        if (partner) partner.type = newType;
+        const partnerBtn = document.querySelector(`.pw-toggle[data-target="${partnerId}"]`);
+        if (partnerBtn) partnerBtn.textContent = newLabel;
+      }
+    });
+  });
+
+  // --- Sync password/pepper between Security Settings and Decrypt section ---
+  function syncFields(sourceId, targetId) {
+    $(sourceId).addEventListener("input", () => {
+      $(targetId).value = $(sourceId).value;
+    });
+    $(targetId).addEventListener("input", () => {
+      $(sourceId).value = $(targetId).value;
+    });
+  }
+  syncFields("password", "extractPassword");
+  syncFields("pepper", "extractPepper");
+
+  // Reset toggle state when output carrier changes
   $("outCarrier").addEventListener("input", () => {
     zwVisible = false;
     zwOriginalText = "";

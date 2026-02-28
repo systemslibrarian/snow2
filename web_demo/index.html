@@ -22,8 +22,8 @@
         <li>Enter a password in <b>Security Settings</b> below.</li>
         <li>Type a secret message (e.g. &ldquo;Meet at 8pm&rdquo;).</li>
         <li>Click <b>Encrypt &amp; Hide</b> &mdash; your message is encrypted and hidden inside normal-looking text!</li>
-        <li>Copy the output and send it anywhere (email, notes app, chat).</li>
-        <li>To read it later: paste it into <b>Step 2: Decrypt</b> with the same password &rarr; your message appears.</li>
+        <li>Copy the output or click <b>Download file</b> and send it anywhere (email, notes app, chat).</li>
+        <li>To read it later: paste or <b>Upload</b> the file into <b>Step 2: Decrypt</b>, enter the same password &rarr; your message appears.</li>
       </ol>
     </section>
 
@@ -33,12 +33,18 @@
       <div class="grid">
         <label>
           Password
-          <input id="password" type="password" placeholder="Enter password" autocomplete="off" />
+          <div class="pw-wrap">
+            <input id="password" type="password" placeholder="Enter password" autocomplete="off" />
+            <button type="button" class="pw-toggle" data-target="password" title="Show password">Show</button>
+          </div>
         </label>
 
         <label>
-          Pepper / “Signal Key” (optional)
-          <input id="pepper" type="password" placeholder="Optional second secret" autocomplete="off" />
+          Pepper / "Signal Key" (optional)
+          <div class="pw-wrap">
+            <input id="pepper" type="password" placeholder="Optional second secret" autocomplete="off" />
+            <button type="button" class="pw-toggle" data-target="pepper" title="Show pepper">Show</button>
+          </div>
         </label>
 
         <label class="checkbox">
@@ -113,9 +119,27 @@
     <section class="card">
       <h2>Step 2: Decrypt &amp; Reveal</h2>
       <p class="note">
-        Paste the text containing a hidden message below, enter the <b>same password</b>
-        (and pepper, if used) in <b>Security Settings</b> above, then click <b>Decrypt</b>.
+        Paste or upload the text containing a hidden message, enter the <b>same password</b>
+        (and pepper, if used), then click <b>Decrypt</b>.
       </p>
+
+      <div class="grid">
+        <label>
+          Password
+          <div class="pw-wrap">
+            <input id="extractPassword" type="password" placeholder="Enter password" autocomplete="off" />
+            <button type="button" class="pw-toggle" data-target="extractPassword" title="Show password">Show</button>
+          </div>
+        </label>
+
+        <label>
+          Pepper / "Signal Key" (optional)
+          <div class="pw-wrap">
+            <input id="extractPepper" type="password" placeholder="Optional second secret" autocomplete="off" />
+            <button type="button" class="pw-toggle" data-target="extractPepper" title="Show pepper">Show</button>
+          </div>
+        </label>
+      </div>
 
       <label>
         Paste text containing a hidden message
@@ -123,8 +147,10 @@
       </label>
 
       <div class="row">
+        <button id="uploadFileBtn">Upload file</button>
         <button id="extractBtn">Decrypt &amp; Reveal</button>
       </div>
+      <input type="file" id="fileInput" hidden />
 
       <label>
         Your decrypted message

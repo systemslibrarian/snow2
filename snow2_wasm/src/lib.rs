@@ -33,10 +33,16 @@ fn build_opts(pepper_required: bool, kdf_mib: u32, kdf_iters: u32, kdf_par: u32)
     let clamped_iters = kdf_iters.max(WASM_MIN_ITERS).min(WASM_MAX_ITERS);
     let clamped_par   = kdf_par.max(WASM_MIN_PAR).min(WASM_MAX_PAR);
 
+    // V4 requires m_cost_kib to be a power of 2 (for log2 encoding).
+    // Round down to the nearest power of 2 (at minimum 8 MiB = 8192 KiB).
+    let m_cost_kib = {
+        let raw = clamped_mib.saturating_mul(1024);
+        let po2 = 1u32 << (31 - raw.leading_zeros()); // largest power of 2 ≤ raw
+        po2.max(WASM_MIN_MIB * 1024)
+    };
+
     let mut opts = EmbedSecurityOptions::default();
     opts.pepper_required = pepper_required;
-
-    let m_cost_kib = clamped_mib.saturating_mul(1024);
 
     opts.kdf = KdfParams {
         m_cost_kib,
