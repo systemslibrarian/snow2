@@ -8,6 +8,10 @@ use libfuzzer_sys::fuzz_target;
 /// or pathological content. Must not panic.
 fuzz_target!(|data: &[u8]| {
     if let Ok(text) = std::str::from_utf8(data) {
+        // Legacy extractor (stops at first line with no ZW chars)
         let _ = snow2::stego::websafe_zw::extract_bits(text);
+
+        // V4 extractor (reads ALL lines — used when every line has ZW content)
+        let _ = snow2::stego::websafe_zw::extract_all_bits(text);
     }
 });
