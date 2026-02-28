@@ -60,9 +60,11 @@ function getSecurityInputs() {
 
   const pepperRequired = $("pepperRequired").checked;
 
-  const kdfMib = Number($("kdfMib").value || 64);
-  const kdfIters = Number($("kdfIters").value || 3);
-  const kdfPar = Number($("kdfPar").value || 1);
+  // Clamp to browser-safe ranges (matches WASM-side limits)
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const kdfMib  = clamp(Number($("kdfMib").value  || 64), 8, 128);
+  const kdfIters = clamp(Number($("kdfIters").value || 3), 1, 8);
+  const kdfPar  = clamp(Number($("kdfPar").value   || 1), 1, 4);
 
   return { password, pepper, pepperRequired, kdfMib, kdfIters, kdfPar };
 }
@@ -78,7 +80,7 @@ async function main() {
 
   $("genCarrier").addEventListener("click", () => {
     $("carrier").value = generateCarrier(6000);
-    status(embedStatus, "ok", "Generated carrier with 6000 lines.");
+    status(embedStatus, "ok", "Sample text generated (6,000 lines). Ready to embed.");
   });
 
   $("embedBtn").addEventListener("click", () => {

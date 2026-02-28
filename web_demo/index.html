@@ -37,25 +37,25 @@
       </div>
 
       <details class="kdf-details">
-        <summary>Advanced: password strength settings</summary>
+        <summary>Advanced: password strength settings (Argon2id)</summary>
         <p class="note kdf-note">
-          These control how hard it is to brute-force the password. Higher values = slower but more secure.
-          The defaults are fine for most use.
+          These control how hard it is to crack your password by guessing. Higher = slower but safer.
+          The defaults are fine for most use. Browsers are limited to lower values than the CLI.
         </p>
         <div class="grid kdf">
           <label>
-            Memory cost (MiB)
-            <input id="kdfMib" type="number" min="8" step="8" value="64" />
+            Memory cost in MiB (Argon2 m_cost)
+            <input id="kdfMib" type="number" min="8" max="128" step="8" value="64" />
           </label>
 
           <label>
-            Time cost (iterations)
-            <input id="kdfIters" type="number" min="1" step="1" value="3" />
+            Passes / time cost (Argon2 t_cost)
+            <input id="kdfIters" type="number" min="1" max="8" step="1" value="3" />
           </label>
 
           <label>
-            Parallelism
-            <input id="kdfPar" type="number" min="1" step="1" value="1" />
+            Parallel lanes (Argon2 p_cost)
+            <input id="kdfPar" type="number" min="1" max="4" step="1" value="1" />
           </label>
         </div>
       </details>
@@ -74,12 +74,12 @@
       </label>
 
       <label>
-        Carrier text (must have many non-empty lines)
-        <textarea id="carrier" rows="10" placeholder="Paste or generate carrier text here..."></textarea>
+        Text to hide your message in (the "carrier" — needs many lines)
+        <textarea id="carrier" rows="10" placeholder="Paste any text here, or click 'Generate sample text' for a ready-made carrier..."></textarea>
       </label>
 
       <div class="row">
-        <button id="genCarrier">Generate carrier (6000 lines)</button>
+        <button id="genCarrier">Generate sample text</button>
         <button id="embedBtn">Embed →</button>
         <button id="clearAllBtn">Clear all</button>
       </div>

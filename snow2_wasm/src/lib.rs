@@ -20,15 +20,28 @@ struct ExtractResult {
 }
 
 fn build_opts(pepper_required: bool, kdf_mib: u32, kdf_iters: u32, kdf_par: u32) -> EmbedSecurityOptions {
+    // WASM-safe limits: browsers typically have 1–4 GB total memory.
+    // Cap KDF to values that won't OOM a browser tab.
+    const WASM_MAX_MIB: u32  = 128;  // keep under ~128 MiB for Argon2 in WASM
+    const WASM_MAX_ITERS: u32 = 8;   // more than 8 is painfully slow in WASM
+    const WASM_MAX_PAR: u32  = 4;    // limited benefit in single-threaded WASM
+    const WASM_MIN_MIB: u32  = 8;
+    const WASM_MIN_ITERS: u32 = 1;
+    const WASM_MIN_PAR: u32  = 1;
+
+    let clamped_mib   = kdf_mib.max(WASM_MIN_MIB).min(WASM_MAX_MIB);
+    let clamped_iters = kdf_iters.max(WASM_MIN_ITERS).min(WASM_MAX_ITERS);
+    let clamped_par   = kdf_par.max(WASM_MIN_PAR).min(WASM_MAX_PAR);
+
     let mut opts = EmbedSecurityOptions::default();
     opts.pepper_required = pepper_required;
 
-    let m_cost_kib = kdf_mib.saturating_mul(1024);
+    let m_cost_kib = clamped_mib.saturating_mul(1024);
 
     opts.kdf = KdfParams {
         m_cost_kib,
-        t_cost: kdf_iters,
-        p_cost: kdf_par,
+        t_cost: clamped_iters,
+        p_cost: clamped_par,
         out_len: 32,
     };
 
