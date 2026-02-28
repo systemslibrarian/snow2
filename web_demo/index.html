@@ -36,22 +36,29 @@
         </label>
       </div>
 
-      <div class="grid kdf">
-        <label>
-          Argon2 memory (MiB)
-          <input id="kdfMib" type="number" min="8" step="8" value="64" />
-        </label>
+      <details class="kdf-details">
+        <summary>Advanced: password strength settings</summary>
+        <p class="note kdf-note">
+          These control how hard it is to brute-force the password. Higher values = slower but more secure.
+          The defaults are fine for most use.
+        </p>
+        <div class="grid kdf">
+          <label>
+            Memory cost (MiB)
+            <input id="kdfMib" type="number" min="8" step="8" value="64" />
+          </label>
 
-        <label>
-          Argon2 iterations
-          <input id="kdfIters" type="number" min="1" step="1" value="3" />
-        </label>
+          <label>
+            Time cost (iterations)
+            <input id="kdfIters" type="number" min="1" step="1" value="3" />
+          </label>
 
-        <label>
-          Argon2 parallelism
-          <input id="kdfPar" type="number" min="1" step="1" value="1" />
-        </label>
-      </div>
+          <label>
+            Parallelism
+            <input id="kdfPar" type="number" min="1" step="1" value="1" />
+          </label>
+        </div>
+      </details>
 
       <p class="note">
         Browser demo uses <b>websafe-zw</b> mode (zero-width embedding). Some platforms may strip zero-width characters.
