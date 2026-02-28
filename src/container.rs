@@ -4,12 +4,19 @@ use serde::{Deserialize, Serialize};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
-use crate::config::EmbedSecurityOptions;
-use crate::crypto;
+use crate::config::{EmbedOptions, EmbedSecurityOptions};
+use crate::crypto::{self};
+use crate::secure_mem::SecureVec;
 use crate::Mode;
+use subtle::ConstantTimeEq;
+
+#[cfg(feature = "pqc")]
+use pqcrypto_traits::{sign::DetachedSignature, kem::PublicKey as KemPublicKey, sign::PublicKey as SignPublicKey};
+
 
 const MAGIC: &[u8; 5] = b"SNOW2";
 const VERSION: u8 = 1;
+const PQC_VERSION: u8 = 2;
 
 /// Versioned container header.
 /// This header is authenticated (AAD) during encryption/decryption.
@@ -40,6 +47,14 @@ pub struct Snow2Header {
 
     /// Plaintext length (informational + authenticated)
     pub plaintext_len: u64,
+
+    /// Post-quantum public keys (only in PQC containers)
+    #[cfg(feature = "pqc")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pqc_kyber_pk_b64: Option<String>,
+    #[cfg(feature = "pqc")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pqc_dilithium_pk_b64: Option<String>,
 }
 
 /// SNOW2 container:
@@ -52,14 +67,31 @@ pub struct Snow2Header {
 pub struct Snow2Container {
     header: Snow2Header,
     ciphertext: Vec<u8>,
+    #[cfg(feature = "pqc")]
+    pqc_signature: Option<Vec<u8>>,
 }
 
 impl Snow2Container {
     /// Create a new container by encrypting a payload using provided security options.
     pub fn seal_with_options(
         plaintext: &[u8],
-        password: &str,
-        pepper: Option<&str>,
+        password: &[u8],
+        pepper: Option<&[u8]>,
+        mode: Mode,
+        opts: &EmbedOptions,
+    ) -> Result<Self> {
+        #[cfg(feature = "pqc")]
+        if opts.security.pqc_enabled {
+            return Self::seal_pqc(plaintext, mode, opts);
+        }
+
+        Self::seal_classic(plaintext, password, pepper, mode, &opts.security)
+    }
+
+    fn seal_classic(
+        plaintext: &[u8],
+        password: &[u8],
+        pepper: Option<&[u8]>,
         mode: Mode,
         opts: &EmbedSecurityOptions,
     ) -> Result<Self> {
@@ -81,6 +113,10 @@ impl Snow2Container {
             nonce_b64: STANDARD.encode(&nonce),
             aead: "XChaCha20-Poly1305".to_string(),
             plaintext_len: plaintext.len() as u64,
+            #[cfg(feature = "pqc")]
+            pqc_kyber_pk_b64: None,
+            #[cfg(feature = "pqc")]
+            pqc_dilithium_pk_b64: None,
         };
 
         let header_json = serde_json::to_vec(&header).context("serialize header")?;
@@ -94,25 +130,87 @@ impl Snow2Container {
         // AEAD seal: AAD = header_json
         let ciphertext = crypto::aead_seal(&key, &nonce, &header_json, plaintext)?;
 
-        Ok(Self { header, ciphertext })
+        Ok(Self {
+            header,
+            ciphertext,
+            #[cfg(feature = "pqc")]
+            pqc_signature: None,
+        })
+    }
+
+    #[cfg(feature = "pqc")]
+    fn seal_pqc(
+        plaintext: &[u8],
+        mode: Mode,
+        opts: &EmbedOptions,
+    ) -> Result<Self> {
+        let pq_pk = opts.pqc_keys.pk.as_ref().context("PQC public key is required for PQC seal.")?;
+
+        let header = Snow2Header {
+            magic: String::from_utf8(MAGIC.to_vec()).expect("MAGIC is valid utf8"),
+            version: PQC_VERSION,
+            mode: mode.as_str().to_string(),
+            kdf: opts.security.kdf.clone(),
+            pepper_required: false, // PQC mode does not use passwords
+            salt_b64: String::new(),
+            nonce_b64: String::new(),
+            aead: "HYBRID-Kyber1024-XChaCha20-Poly1305".to_string(),
+            plaintext_len: plaintext.len() as u64,
+            pqc_kyber_pk_b64: Some(STANDARD.encode(pq_pk.kyber_pk.as_bytes())),
+            pqc_dilithium_pk_b64: Some(STANDARD.encode(pq_pk.dilithium_pk.as_bytes())),
+        };
+
+        let header_json = serde_json::to_vec(&header).context("serialize header")?;
+
+        let (kyber_ct, classic_ct) =
+            crate::pqc::hybrid_encrypt(plaintext, &pq_pk.kyber_pk, &header_json)?;
+
+        // The final ciphertext is: [kyber_ct_len u16 LE | kyber_ct | classic_ct]
+        let mut ciphertext = Vec::with_capacity(2 + kyber_ct.len() + classic_ct.len());
+        ciphertext.extend_from_slice(&(kyber_ct.len() as u16).to_le_bytes());
+        ciphertext.extend_from_slice(&kyber_ct);
+        ciphertext.extend_from_slice(&classic_ct);
+
+        // Sign the whole thing
+        let pq_sk = opts.pqc_keys.sk.as_ref().context("PQC secret key is required for PQC seal.")?;
+        let signature = crate::pqc::sign(&ciphertext, &pq_sk.dilithium_sk);
+
+        Ok(Self {
+            header,
+            ciphertext,
+            pqc_signature: Some(signature.as_bytes().to_vec()),
+        })
     }
 
     /// Backward-compatible helper: seal using recommended defaults (pepper optional).
     pub fn seal(
         plaintext: &[u8],
-        password: &str,
-        pepper: Option<&str>,
+        password: &[u8],
+        pepper: Option<&[u8]>,
         mode: Mode,
     ) -> Result<Self> {
-        let opts = EmbedSecurityOptions::default();
+        let opts = EmbedOptions::default();
         Self::seal_with_options(plaintext, password, pepper, mode, &opts)
     }
 
     /// Open and decrypt a container.
-    pub fn open(&self, password: &str, pepper: Option<&str>) -> Result<Vec<u8>> {
-        if self.header.magic.as_bytes() != MAGIC {
+    pub fn open(
+        &self,
+        password: &[u8],
+        pepper: Option<&[u8]>,
+        pqc_sk: Option<&[u8]>,
+    ) -> Result<SecureVec> {
+        // SECURITY: Constant-time magic check
+        if self.header.magic.as_bytes().ct_eq(MAGIC).unwrap_u8() != 1 {
             bail!("Not a SNOW2 container (bad magic).");
         }
+
+        #[cfg(feature = "pqc")]
+        if self.header.version == PQC_VERSION {
+            let sk = pqc_sk.context("PQC container requires a secret key (--pqc-sk).")?;
+            return self.open_pqc(sk);
+        }
+
         if self.header.version != VERSION {
             bail!(
                 "Unsupported SNOW2 container version: {} (expected {}).",
@@ -120,7 +218,15 @@ impl Snow2Container {
                 VERSION
             );
         }
-        if self.header.aead != "XChaCha20-Poly1305" {
+        // SECURITY: Constant-time AEAD check
+        if self
+            .header
+            .aead
+            .as_bytes()
+            .ct_eq(b"XChaCha20-Poly1305")
+            .unwrap_u8()
+            != 1
+        {
             bail!("Unsupported AEAD: {}", self.header.aead);
         }
         if self.header.pepper_required && pepper.is_none() {
@@ -153,6 +259,61 @@ impl Snow2Container {
         Ok(plaintext)
     }
 
+    #[cfg(feature = "pqc")]
+    fn open_pqc(&self, sk_bytes: &[u8]) -> Result<SecureVec> {
+        use crate::pqc::{PqSecretKey};
+
+        let sig = self
+            .pqc_signature
+            .as_ref()
+            .context("PQC container is missing signature.")?;
+
+        let dilithium_pk_b64 = self
+            .header
+            .pqc_dilithium_pk_b64
+            .as_ref()
+            .context("PQC header is missing Dilithium public key.")?;
+        let dilithium_pk_bytes = STANDARD
+            .decode(dilithium_pk_b64)
+            .context("Failed to decode Dilithium public key")?;
+        let dilithium_pk =
+            crate::pqc::DilithiumPublicKey::from_bytes(&dilithium_pk_bytes)?;
+
+        // Verify signature over the ciphertext first
+        crate::pqc::verify(&self.ciphertext, sig, &dilithium_pk)?;
+
+        // The ciphertext is: [kyber_ct_len u16 LE | kyber_ct | classic_ct]
+        if self.ciphertext.len() < 2 {
+            bail!("Truncated PQC ciphertext (missing length).");
+        }
+        let kyber_ct_len = u16::from_le_bytes(self.ciphertext[0..2].try_into().unwrap()) as usize;
+        let kyber_ct_end = 2 + kyber_ct_len;
+        if self.ciphertext.len() < kyber_ct_end {
+            bail!("Truncated PQC ciphertext (missing Kyber ciphertext).");
+        }
+        let kyber_ct = &self.ciphertext[2..kyber_ct_end];
+        let classic_ct = &self.ciphertext[kyber_ct_end..];
+
+        // Reconstruct secret key from bytes
+        let sk = PqSecretKey::from_bytes(sk_bytes)?;
+
+        let header_json = serde_json::to_vec(&self.header).context("serialize header (aad)")?;
+
+        // Decrypt
+        let plaintext =
+            crate::pqc::hybrid_decrypt(kyber_ct, classic_ct, &sk.kyber_sk, &header_json)?;
+
+        if plaintext.len() as u64 != self.header.plaintext_len {
+            bail!(
+                "Decrypted length mismatch (got {}, expected {}).",
+                plaintext.len(),
+                self.header.plaintext_len
+            );
+        }
+
+        Ok(plaintext)
+    }
+
     pub fn header(&self) -> &Snow2Header {
         &self.header
     }
@@ -165,11 +326,26 @@ impl Snow2Container {
             .try_into()
             .context("header too large")?;
 
-        let mut out = Vec::with_capacity(5 + 1 + 4 + header_json.len() + self.ciphertext.len());
+        let _sig_overhead = {
+            #[cfg(feature = "pqc")]
+            { self.pqc_signature.as_ref().map(|s| s.len() + 2).unwrap_or(0) }
+            #[cfg(not(feature = "pqc"))]
+            { 0usize }
+        };
+        let mut out = Vec::with_capacity(
+            5 + 1 + 4 + header_json.len() + self.ciphertext.len() + _sig_overhead,
+        );
         out.extend_from_slice(MAGIC);
-        out.push(VERSION);
+        out.push(self.header.version);
         out.extend_from_slice(&header_len.to_le_bytes());
         out.extend_from_slice(&header_json);
+
+        #[cfg(feature = "pqc")]
+        if let Some(sig) = &self.pqc_signature {
+            out.extend_from_slice(&(sig.len() as u16).to_le_bytes());
+            out.extend_from_slice(sig);
+        }
+
         out.extend_from_slice(&self.ciphertext);
         Ok(out)
     }
@@ -181,16 +357,17 @@ impl Snow2Container {
         }
 
         let magic = &input[0..5];
-        if magic != MAGIC {
+        if magic.ct_eq(MAGIC).unwrap_u8() != 1 {
             bail!("Not a SNOW2 container (bad magic).");
         }
 
         let version = input[5];
-        if version != VERSION {
+        if version != VERSION && version != PQC_VERSION {
             bail!(
-                "Unsupported SNOW2 container version: {} (expected {}).",
+                "Unsupported SNOW2 container version: {} (expected {} or {}).",
                 version,
-                VERSION
+                VERSION,
+                PQC_VERSION
             );
         }
 
@@ -209,18 +386,48 @@ impl Snow2Container {
         let header_json = &input[header_start..header_end];
         let header: Snow2Header = serde_json::from_slice(header_json).context("parse header")?;
 
-        if header.magic.as_bytes() != MAGIC {
+        if header.magic.as_bytes().ct_eq(MAGIC).unwrap_u8() != 1 {
             bail!("Bad header magic.");
         }
-        if header.version != VERSION {
-            bail!("Bad header version.");
+        if header.version != version {
+            bail!("Header version mismatch.");
         }
 
-        let ciphertext = input[header_end..].to_vec();
+        let mut ciphertext_start = header_end;
+        #[cfg(feature = "pqc")]
+        let mut pqc_signature: Option<Vec<u8>> = None;
+        #[cfg(not(feature = "pqc"))]
+        let pqc_signature: Option<Vec<u8>> = None;
+
+        #[cfg(feature = "pqc")]
+        if version == PQC_VERSION {
+            if input.len() < header_end + 2 {
+                bail!("Truncated PQC signature length.");
+            }
+            let sig_len = u16::from_le_bytes(
+                input[header_end..header_end + 2]
+                    .try_into()
+                    .expect("slice length checked"),
+            ) as usize;
+            ciphertext_start += 2;
+            let sig_end = ciphertext_start + sig_len;
+            if input.len() < sig_end {
+                bail!("Truncated PQC signature.");
+            }
+            pqc_signature = Some(input[ciphertext_start..sig_end].to_vec());
+            ciphertext_start = sig_end;
+        }
+
+        let ciphertext = input[ciphertext_start..].to_vec();
         if ciphertext.is_empty() {
             bail!("Missing ciphertext.");
         }
 
-        Ok(Self { header, ciphertext })
+        Ok(Self {
+            header,
+            ciphertext,
+            #[cfg(feature = "pqc")]
+            pqc_signature,
+        })
     }
 }

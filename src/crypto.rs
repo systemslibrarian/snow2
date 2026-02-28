@@ -4,8 +4,12 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     Key, XChaCha20Poly1305, XNonce,
 };
+use crate::secure_mem::SecureVec;
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
+use zeroize::{Zeroizing};
+
+/// A key that will be zeroized on drop.
+pub type ZeroizingKey = Zeroizing<[u8; 32]>;
 
 /// Argon2id parameters (authenticated in the container header).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,11 +52,11 @@ pub fn random_bytes(len: usize) -> Result<Vec<u8>> {
 /// - optional pepper (not stored; extra "Signal Key")
 /// - salt (per-message random)
 pub fn derive_key(
-    password: &str,
-    pepper: Option<&str>,
+    password: &[u8],
+    pepper: Option<&[u8]>,
     salt: &[u8],
     params: &KdfParams,
-) -> Result<[u8; 32]> {
+) -> Result<ZeroizingKey> {
     if password.is_empty() {
         bail!("Password must not be empty.");
     }
@@ -64,11 +68,13 @@ pub fn derive_key(
     }
 
     // password || 0x00 || pepper (if present)
-    let mut pw = Vec::with_capacity(password.len() + 1 + pepper.map(|p| p.len()).unwrap_or(0));
-    pw.extend_from_slice(password.as_bytes());
+    let mut pw = Zeroizing::new(Vec::with_capacity(
+        password.len() + 1 + pepper.map(|p| p.len()).unwrap_or(0),
+    ));
+    pw.extend_from_slice(password);
     pw.push(0u8);
     if let Some(p) = pepper {
-        pw.extend_from_slice(p.as_bytes());
+        pw.extend_from_slice(p);
     }
 
     let out_len_usize: usize = params
@@ -86,18 +92,17 @@ pub fn derive_key(
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
 
-    let mut out = [0u8; 32];
+    let mut out = Zeroizing::new([0u8; 32]);
     argon2
-        .hash_password_into(&pw, salt, &mut out)
+        .hash_password_into(&pw, salt, &mut *out)
         .map_err(|e| anyhow!("Argon2id derive failed: {:?}", e))?;
 
-    pw.zeroize();
     Ok(out)
 }
 
 /// AEAD seal using XChaCha20-Poly1305.
 pub fn aead_seal(
-    key: &[u8; 32],
+    key: &ZeroizingKey,
     nonce: &[u8],
     aad: &[u8],
     plaintext: &[u8],
@@ -106,7 +111,7 @@ pub fn aead_seal(
         bail!("Invalid nonce length: {} (expected 24).", nonce.len());
     }
 
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
     let n = XNonce::from_slice(nonce);
 
     let ct = cipher
@@ -118,16 +123,16 @@ pub fn aead_seal(
 
 /// AEAD open using XChaCha20-Poly1305.
 pub fn aead_open(
-    key: &[u8; 32],
+    key: &ZeroizingKey,
     nonce: &[u8],
     aad: &[u8],
     ciphertext: &[u8],
-) -> Result<Vec<u8>> {
+) -> Result<SecureVec> {
     if nonce.len() != 24 {
         bail!("Invalid nonce length: {} (expected 24).", nonce.len());
     }
 
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
     let n = XNonce::from_slice(nonce);
 
     let pt = cipher
@@ -138,6 +143,5 @@ pub fn aead_open(
                 e
             )
         })?;
-
-    Ok(pt)
+    SecureVec::from_slice(&pt)
 }

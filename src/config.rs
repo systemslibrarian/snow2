@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "pqc")]
+use crate::pqc::{PqPublicKey, PqSecretKey};
 
 use crate::crypto::KdfParams;
 
@@ -14,6 +16,24 @@ pub struct EmbedSecurityOptions {
     /// If true, a pepper is REQUIRED to decrypt.
     /// (Without it, extraction must fail.)
     pub pepper_required: bool,
+
+    /// If true, use post-quantum hybrid encryption.
+    #[cfg(feature = "pqc")]
+    pub pqc_enabled: bool,
+}
+
+#[cfg(feature = "pqc")]
+#[derive(Debug, Default)]
+pub struct PqKeys {
+    pub pk: Option<PqPublicKey>,
+    pub sk: Option<PqSecretKey>,
+}
+
+#[derive(Debug, Default)]
+pub struct EmbedOptions {
+    pub security: EmbedSecurityOptions,
+    #[cfg(feature = "pqc")]
+    pub pqc_keys: PqKeys,
 }
 
 impl Default for EmbedSecurityOptions {
@@ -21,6 +41,8 @@ impl Default for EmbedSecurityOptions {
         Self {
             kdf: KdfParams::recommended(),
             pepper_required: false,
+            #[cfg(feature = "pqc")]
+            pqc_enabled: false,
         }
     }
 }
@@ -29,8 +51,8 @@ impl EmbedSecurityOptions {
     /// Convenience: strict mode expects a pepper.
     pub fn strict_with_pepper() -> Self {
         Self {
-            kdf: KdfParams::recommended(),
             pepper_required: true,
+            ..Default::default()
         }
     }
 }

@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use snow2::{config::EmbedSecurityOptions, crypto::KdfParams, Mode};
+use snow2::{config::{EmbedOptions, EmbedSecurityOptions}, crypto::KdfParams, Mode};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -53,13 +53,15 @@ pub fn embed_websafe_zw(
         return Err(JsValue::from_str("Pepper is required by policy, but none was provided."));
     }
 
+    let embed_opts = EmbedOptions { security: opts, ..Default::default() };
+
     let out = snow2::embed_with_options(
         Mode::WebSafeZeroWidth,
         carrier_text,
         message.as_bytes(),
-        password,
-        pepper.as_deref(),
-        &opts,
+        password.as_bytes(),
+        pepper.as_deref().map(|s| s.as_bytes()),
+        &embed_opts,
     )
     .map_err(|e| JsValue::from_str(&format!("{e:#}")))?;
 
@@ -77,13 +79,14 @@ pub fn extract_websafe_zw(
     let bytes = snow2::extract(
         Mode::WebSafeZeroWidth,
         carrier_text,
-        password,
-        pepper.as_deref(),
+        password.as_bytes(),
+        pepper.as_deref().map(|s| s.as_bytes()),
+        None, // no PQC secret key in web demo
     )
     .map_err(|e| JsValue::from_str(&format!("{e:#}")))?;
 
-    let as_base64 = STANDARD.encode(&bytes);
-    let as_utf8 = std::str::from_utf8(&bytes).ok().map(|s| s.to_string());
+    let as_base64 = STANDARD.encode(&*bytes);
+    let as_utf8 = std::str::from_utf8(&*bytes).ok().map(|s| s.to_string());
 
     let result = ExtractResult {
         as_utf8,
