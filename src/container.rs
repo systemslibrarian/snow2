@@ -17,6 +17,25 @@ use pqcrypto_traits::{sign::DetachedSignature, kem::PublicKey as KemPublicKey, s
 const MAGIC: &[u8; 5] = b"SNOW2";
 const VERSION: u8 = 1;
 const PQC_VERSION: u8 = 2;
+/// Compact binary header version – replaces JSON with a fixed 57-byte header.
+const VERSION_COMPACT: u8 = 3;
+
+/// Binary header layout for compact containers (v3):
+///
+/// ```text
+/// offset  size  field
+///  0       1    mode        (0=classic-trailing, 1=websafe-zw)
+///  1       1    aead        (0=XChaCha20-Poly1305)
+///  2       4    m_cost_kib  (u32 LE)
+///  6       4    t_cost      (u32 LE)
+/// 10       1    p_cost      (u8)
+/// 11       1    out_len     (u8, always 32)
+/// 12       1    flags       (bit 0 = pepper_required)
+/// 13      16    salt        (raw bytes)
+/// 29      24    nonce       (raw bytes)
+/// 53       4    plaintext_len (u32 LE)
+/// ```
+const COMPACT_HDR_LEN: usize = 57;
 
 /// Versioned container header.
 /// This header is authenticated (AAD) during encryption/decryption.
@@ -67,6 +86,9 @@ pub struct Snow2Header {
 pub struct Snow2Container {
     header: Snow2Header,
     ciphertext: Vec<u8>,
+    /// Raw binary header bytes used as AEAD AAD for compact (v3) containers.
+    /// `None` for v1/v2 containers (AAD is re-serialized JSON).
+    raw_header_aad: Option<Vec<u8>>,
     #[cfg(feature = "pqc")]
     pqc_signature: Option<Vec<u8>>,
 }
@@ -85,9 +107,12 @@ impl Snow2Container {
             return Self::seal_pqc(plaintext, mode, opts);
         }
 
-        Self::seal_classic(plaintext, password, pepper, mode, &opts.security)
+        Self::seal_compact(plaintext, password, pepper, mode, &opts.security)
     }
 
+    /// Seal using a v1 JSON header.  No longer the default (compact v3 is
+    /// preferred), but kept for backward-compatibility test coverage.
+    #[allow(dead_code)]
     fn seal_classic(
         plaintext: &[u8],
         password: &[u8],
@@ -137,6 +162,82 @@ impl Snow2Container {
         Ok(Self {
             header,
             ciphertext,
+            raw_header_aad: None,
+            #[cfg(feature = "pqc")]
+            pqc_signature: None,
+        })
+    }
+
+    /// Seal with a compact binary header (v3).  Produces a much smaller
+    /// container than `seal_classic` because the header is a fixed 57-byte
+    /// binary blob instead of ~290-byte JSON.
+    fn seal_compact(
+        plaintext: &[u8],
+        password: &[u8],
+        pepper: Option<&[u8]>,
+        mode: Mode,
+        opts: &EmbedSecurityOptions,
+    ) -> Result<Self> {
+        if opts.pepper_required && pepper.is_none() {
+            bail!("Pepper is required by policy, but no pepper was provided.");
+        }
+        opts.kdf.validate_extraction_bounds()?;
+
+        if opts.kdf.p_cost > 255 {
+            bail!("p_cost {} exceeds compact header max (255).", opts.kdf.p_cost);
+        }
+        if opts.kdf.out_len > 255 {
+            bail!("out_len {} exceeds compact header max (255).", opts.kdf.out_len);
+        }
+
+        let salt = crypto::random_bytes(16)?;
+        let nonce = crypto::random_bytes(24)?;
+
+        // Build binary header (57 bytes)
+        let mode_byte: u8 = match mode {
+            Mode::ClassicTrailing => 0,
+            Mode::WebSafeZeroWidth => 1,
+        };
+        let mut bin_hdr = Vec::with_capacity(COMPACT_HDR_LEN);
+        bin_hdr.push(mode_byte);
+        bin_hdr.push(0u8); // aead = XChaCha20-Poly1305
+        bin_hdr.extend_from_slice(&opts.kdf.m_cost_kib.to_le_bytes());
+        bin_hdr.extend_from_slice(&opts.kdf.t_cost.to_le_bytes());
+        bin_hdr.push(opts.kdf.p_cost as u8);
+        bin_hdr.push(opts.kdf.out_len as u8);
+        bin_hdr.push(if opts.pepper_required { 1 } else { 0 });
+        bin_hdr.extend_from_slice(&salt);
+        bin_hdr.extend_from_slice(&nonce);
+        bin_hdr.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
+        debug_assert_eq!(bin_hdr.len(), COMPACT_HDR_LEN);
+
+        // Derive key
+        let key = crypto::derive_key(password, pepper, &salt, &opts.kdf)?;
+
+        // AEAD seal: AAD = binary header
+        let ciphertext = crypto::aead_seal(&key, &nonce, &bin_hdr, plaintext)?;
+
+        // Build Snow2Header for in-memory representation
+        let header = Snow2Header {
+            magic: String::from_utf8(MAGIC.to_vec()).expect("MAGIC is valid utf8"),
+            version: VERSION_COMPACT,
+            mode: mode.as_str().to_string(),
+            kdf: opts.kdf.clone(),
+            pepper_required: opts.pepper_required,
+            salt_b64: STANDARD.encode(&salt),
+            nonce_b64: STANDARD.encode(&nonce),
+            aead: "XChaCha20-Poly1305".to_string(),
+            plaintext_len: plaintext.len() as u64,
+            #[cfg(feature = "pqc")]
+            pqc_kyber_pk_b64: None,
+            #[cfg(feature = "pqc")]
+            pqc_dilithium_pk_b64: None,
+        };
+
+        Ok(Self {
+            header,
+            ciphertext,
+            raw_header_aad: Some(bin_hdr),
             #[cfg(feature = "pqc")]
             pqc_signature: None,
         })
@@ -182,6 +283,7 @@ impl Snow2Container {
         Ok(Self {
             header,
             ciphertext,
+            raw_header_aad: None,
             pqc_signature: Some(signature.as_bytes().to_vec()),
         })
     }
@@ -215,11 +317,17 @@ impl Snow2Container {
             return self.open_pqc(sk);
         }
 
+        if self.header.version == VERSION_COMPACT {
+            return self.open_compact(password, pepper);
+        }
+
         if self.header.version != VERSION {
             bail!(
-                "Unsupported SNOW2 container version: {} (expected {}).",
+                "Unsupported SNOW2 container version: {} (expected {}, {}, or {}).",
                 self.header.version,
-                VERSION
+                VERSION,
+                PQC_VERSION,
+                VERSION_COMPACT,
             );
         }
         // SECURITY: Constant-time AEAD check
@@ -260,6 +368,35 @@ impl Snow2Container {
 
         let key = crypto::derive_key(password, pepper, &salt_raw, &self.header.kdf)?;
         let plaintext = crypto::aead_open(&key, &nonce, &header_json, &self.ciphertext)?;
+
+        if plaintext.len() as u64 != self.header.plaintext_len {
+            bail!(
+                "Decrypted length mismatch (got {}, expected {}).",
+                plaintext.len(),
+                self.header.plaintext_len
+            );
+        }
+
+        Ok(plaintext)
+    }
+
+    /// Open a compact (v3) container using the stored binary header as AAD.
+    fn open_compact(&self, password: &[u8], pepper: Option<&[u8]>) -> Result<SecureVec> {
+        let aad = self.raw_header_aad.as_ref()
+            .context("v3 container is missing raw binary header AAD")?;
+
+        if self.header.pepper_required && pepper.is_none() {
+            bail!("Pepper is required by this container, but none was provided.");
+        }
+
+        self.header.kdf.validate_extraction_bounds()?;
+
+        // Extract salt and nonce directly from the binary header
+        let salt = &aad[13..29];
+        let nonce = &aad[29..53];
+
+        let key = crypto::derive_key(password, pepper, salt, &self.header.kdf)?;
+        let plaintext = crypto::aead_open(&key, nonce, aad, &self.ciphertext)?;
 
         if plaintext.len() as u64 != self.header.plaintext_len {
             bail!(
@@ -333,6 +470,21 @@ impl Snow2Container {
 
     /// Serialize container to bytes (for stego embedding).
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        // Compact binary header (v3)
+        if self.header.version == VERSION_COMPACT {
+            let bin_hdr = self.raw_header_aad.as_ref()
+                .context("v3 container missing raw_header_aad")?;
+            let hdr_len = bin_hdr.len() as u32;
+            let mut out = Vec::with_capacity(5 + 1 + 4 + bin_hdr.len() + self.ciphertext.len());
+            out.extend_from_slice(MAGIC);
+            out.push(VERSION_COMPACT);
+            out.extend_from_slice(&hdr_len.to_le_bytes());
+            out.extend_from_slice(bin_hdr);
+            out.extend_from_slice(&self.ciphertext);
+            return Ok(out);
+        }
+
+        // JSON header (v1 / v2)
         let header_json = serde_json::to_vec(&self.header).context("serialize header")?;
         let header_len: u32 = header_json
             .len()
@@ -375,12 +527,13 @@ impl Snow2Container {
         }
 
         let version = input[5];
-        if version != VERSION && version != PQC_VERSION {
+        if version != VERSION && version != PQC_VERSION && version != VERSION_COMPACT {
             bail!(
-                "Unsupported SNOW2 container version: {} (expected {} or {}).",
+                "Unsupported SNOW2 container version: {} (expected {}, {}, or {}).",
                 version,
                 VERSION,
-                PQC_VERSION
+                PQC_VERSION,
+                VERSION_COMPACT,
             );
         }
 
@@ -390,7 +543,7 @@ impl Snow2Container {
                 .expect("slice length checked"),
         ) as usize;
 
-        // SECURITY: Cap header length to prevent absurdly large JSON
+        // SECURITY: Cap header length to prevent absurdly large
         // allocations from a malicious container. 64 KiB is far more
         // than any legitimate header will ever need.
         const MAX_HEADER_LEN: usize = 64 * 1024;
@@ -408,6 +561,12 @@ impl Snow2Container {
             bail!("Truncated SNOW2 header.");
         }
 
+        // ---- Compact binary header (v3) ----
+        if version == VERSION_COMPACT {
+            return Self::parse_compact(input, header_start, header_end);
+        }
+
+        // ---- JSON header (v1/v2) ----
         let header_json = &input[header_start..header_end];
         let header: Snow2Header = serde_json::from_slice(header_json).context("parse header")?;
 
@@ -453,8 +612,73 @@ impl Snow2Container {
         Ok(Self {
             header,
             ciphertext,
+            raw_header_aad: None,
             #[cfg(feature = "pqc")]
             pqc_signature,
+        })
+    }
+
+    /// Parse a compact binary header (v3) from bytes.
+    fn parse_compact(input: &[u8], header_start: usize, header_end: usize) -> Result<Self> {
+        let bin_hdr = &input[header_start..header_end];
+        if bin_hdr.len() < COMPACT_HDR_LEN {
+            bail!(
+                "Compact header too short: {} bytes (expected {}).",
+                bin_hdr.len(),
+                COMPACT_HDR_LEN,
+            );
+        }
+
+        let mode = match bin_hdr[0] {
+            0 => "classic-trailing",
+            1 => "websafe-zw",
+            other => bail!("Unknown compact mode byte: {}", other),
+        };
+        let aead = match bin_hdr[1] {
+            0 => "XChaCha20-Poly1305",
+            other => bail!("Unknown compact AEAD byte: {}", other),
+        };
+        let m_cost_kib = u32::from_le_bytes(bin_hdr[2..6].try_into().unwrap());
+        let t_cost = u32::from_le_bytes(bin_hdr[6..10].try_into().unwrap());
+        let p_cost = bin_hdr[10] as u32;
+        let out_len = bin_hdr[11] as u32;
+        let pepper_required = bin_hdr[12] != 0;
+        let salt = &bin_hdr[13..29];
+        let nonce = &bin_hdr[29..53];
+        let plaintext_len = u32::from_le_bytes(bin_hdr[53..57].try_into().unwrap());
+
+        let header = Snow2Header {
+            magic: String::from_utf8(MAGIC.to_vec()).expect("MAGIC is valid utf8"),
+            version: VERSION_COMPACT,
+            mode: mode.to_string(),
+            kdf: crypto::KdfParams {
+                m_cost_kib,
+                t_cost,
+                p_cost,
+                out_len,
+            },
+            pepper_required,
+            salt_b64: STANDARD.encode(salt),
+            nonce_b64: STANDARD.encode(nonce),
+            aead: aead.to_string(),
+            plaintext_len: plaintext_len as u64,
+            #[cfg(feature = "pqc")]
+            pqc_kyber_pk_b64: None,
+            #[cfg(feature = "pqc")]
+            pqc_dilithium_pk_b64: None,
+        };
+
+        let ciphertext = input[header_end..].to_vec();
+        if ciphertext.is_empty() {
+            bail!("Missing ciphertext.");
+        }
+
+        Ok(Self {
+            header,
+            ciphertext,
+            raw_header_aad: Some(bin_hdr.to_vec()),
+            #[cfg(feature = "pqc")]
+            pqc_signature: None,
         })
     }
 }

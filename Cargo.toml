@@ -38,6 +38,7 @@ subtle = "2.6.1"
 sha2 = "0.10"
 hkdf = "0.12.4"
 crc32fast = "1.4"
+flate2 = "1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = "0.2.182"
