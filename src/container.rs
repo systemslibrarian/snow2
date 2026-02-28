@@ -434,6 +434,26 @@ impl Snow2Container {
         Self::seal_with_options(plaintext, password, pepper, mode, &opts)
     }
 
+    /// Return the raw salt bytes from this container's header.
+    pub fn salt_bytes(&self) -> Result<Vec<u8>> {
+        if let Some(ref aad) = self.raw_header_aad {
+            // v3: salt at 13..29; v4: salt at 5..21
+            if self.header.version == VERSION_HARDENED {
+                Ok(aad[5..21].to_vec())
+            } else {
+                Ok(aad[13..29].to_vec())
+            }
+        } else {
+            STANDARD.decode(&self.header.salt_b64)
+                .map_err(|e| anyhow::anyhow!("decode salt_b64: {e}"))
+        }
+    }
+
+    /// Return a clone of the KDF params from this container's header.
+    pub fn kdf_params(&self) -> crypto::KdfParams {
+        self.header.kdf.clone()
+    }
+
     /// Open and decrypt a container.
     pub fn open(
         &self,
@@ -573,6 +593,49 @@ impl Snow2Container {
         let decrypted = crypto::aead_open(&key, nonce, aad, &self.ciphertext)?;
 
         // Decompress if plaintext was compressed
+        let plaintext = if compressed {
+            let mut decoder = DeflateDecoder::new(Vec::new());
+            decoder.write_all(&decrypted)
+                .context("deflate decompress failed")?;
+            let raw = decoder.finish()
+                .context("deflate decompress finish failed")?;
+            SecureVec::from_slice(&raw)
+                .context("SecureVec creation failed")?
+        } else {
+            decrypted
+        };
+
+        if plaintext.len() as u64 != self.header.plaintext_len {
+            bail!(
+                "Decrypted length mismatch (got {}, expected {}).",
+                plaintext.len(),
+                self.header.plaintext_len
+            );
+        }
+
+        Ok(plaintext)
+    }
+
+    /// Open a v4 container with a pre-derived inner AEAD key.
+    ///
+    /// Used by the extraction pipeline where the master secret was already
+    /// derived via Argon2.  Avoids a redundant Argon2 run.
+    pub fn open_with_key(&self, inner_key: &crypto::ZeroizingKey) -> Result<SecureVec> {
+        let aad = self.raw_header_aad.as_ref()
+            .context("v4 container is missing raw binary header AAD")?;
+
+        let flags = aad[0];
+        let compressed = (flags & 0x02) != 0;
+
+        if self.header.pepper_required {
+            // Pepper was already bound into the key via HKDF during derivation.
+            // No separate check needed here — if wrong pepper was used, AEAD
+            // will fail.
+        }
+
+        let nonce = &aad[21..45];
+        let decrypted = crypto::aead_open(inner_key, nonce, aad, &self.ciphertext)?;
+
         let plaintext = if compressed {
             let mut decoder = DeflateDecoder::new(Vec::new());
             decoder.write_all(&decrypted)

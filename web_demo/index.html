@@ -62,7 +62,13 @@
         <div class="grid kdf">
           <label>
             Memory cost in MiB (Argon2 m_cost)
-            <input id="kdfMib" type="number" min="8" max="128" step="8" value="64" />
+            <select id="kdfMib">
+              <option value="8">8 MiB</option>
+              <option value="16">16 MiB</option>
+              <option value="32">32 MiB</option>
+              <option value="64" selected>64 MiB (default)</option>
+              <option value="128">128 MiB</option>
+            </select>
           </label>
 
           <label>

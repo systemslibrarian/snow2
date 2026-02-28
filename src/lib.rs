@@ -83,6 +83,11 @@ fn deflate_decompress(data: &[u8]) -> Option<Vec<u8>> {
 //   open → (optional inflate) → plaintext
 //   If v4 fails → fall back to legacy (CRC framing + old formats)
 
+/// Soft cap on carrier text size (10 MiB).  Larger carriers explode the bit
+/// vector and slow down embed/extract considerably.  Users who genuinely
+/// need larger carriers can raise this or pre-split the text.
+const MAX_CARRIER_BYTES: usize = 10 * 1024 * 1024;
+
 /// Embed payload bytes into a carrier text using the chosen mode.
 /// Returns the modified carrier text.
 ///
@@ -103,9 +108,31 @@ pub fn embed(
     let container = container::Snow2Container::seal(payload, password, pepper, mode)?;
     let container_bytes = container.to_bytes()?;
 
+    // Soft cap on carrier size
+    if carrier_text.len() > MAX_CARRIER_BYTES {
+        bail!(
+            "Carrier text is too large ({:.1} MiB, max {} MiB). \
+             Split the carrier or use a smaller file.",
+            carrier_text.len() as f64 / (1024.0 * 1024.0),
+            MAX_CARRIER_BYTES / (1024 * 1024),
+        );
+    }
+
     // Constant-size padding: [real_len(4 LE)][container_bytes][random_pad]
     let inner_len = 4 + container_bytes.len();
     let bucket = container::pad_bucket(inner_len);
+
+    if bucket > V4_MAX_BUCKET {
+        bail!(
+            "Payload too large for v4 pipeline: padded container needs {} bytes \
+             (max {} bytes / ~{} KiB usable payload). \
+             Try a shorter message or use the CLI with legacy mode for large payloads.",
+            bucket,
+            V4_MAX_BUCKET,
+            V4_MAX_PAYLOAD_DISPLAY / 1024,
+        );
+    }
+
     let pad_len = bucket - inner_len;
     let random_pad = crypto::random_bytes(pad_len)?;
 
@@ -114,8 +141,14 @@ pub fn embed(
     padded.extend_from_slice(&container_bytes);
     padded.extend_from_slice(&random_pad);
 
-    // Outer AEAD encrypt
-    let outer_blob = crypto::outer_seal(password, &padded)?;
+    // Outer AEAD encrypt — derived from Argon2 with standard KDF params.
+    // Always uses recommended() params so extraction can derive the same key
+    // without knowing the container's custom KDF settings.
+    let salt = container.salt_bytes()?;
+    let outer_params = crypto::KdfParams::recommended();
+    let outer_master = crypto::derive_master_secret(password, &salt, &outer_params)?;
+    let outer_key = crypto::derive_outer_key_from_master(&outer_master)?;
+    let outer_blob = crypto::outer_seal_with_key(&outer_key, &salt, &padded)?;
 
     // Raw bits (no CRC framing — outer AEAD provides integrity)
     let bits = stego::raw_bytes_to_bits(&outer_blob);
@@ -140,9 +173,31 @@ pub fn embed_with_options(
         container::Snow2Container::seal_with_options(payload, password, pepper, mode, opts)?;
     let container_bytes = container.to_bytes()?;
 
+    // Soft cap on carrier size
+    if carrier_text.len() > MAX_CARRIER_BYTES {
+        bail!(
+            "Carrier text is too large ({:.1} MiB, max {} MiB). \
+             Split the carrier or use a smaller file.",
+            carrier_text.len() as f64 / (1024.0 * 1024.0),
+            MAX_CARRIER_BYTES / (1024 * 1024),
+        );
+    }
+
     // Constant-size padding
     let inner_len = 4 + container_bytes.len();
     let bucket = container::pad_bucket(inner_len);
+
+    if bucket > V4_MAX_BUCKET {
+        bail!(
+            "Payload too large for v4 pipeline: padded container needs {} bytes \
+             (max {} bytes / ~{} KiB usable payload). \
+             Try a shorter message or use the CLI with legacy mode for large payloads.",
+            bucket,
+            V4_MAX_BUCKET,
+            V4_MAX_PAYLOAD_DISPLAY / 1024,
+        );
+    }
+
     let pad_len = bucket - inner_len;
     let random_pad = crypto::random_bytes(pad_len)?;
 
@@ -151,8 +206,12 @@ pub fn embed_with_options(
     padded.extend_from_slice(&container_bytes);
     padded.extend_from_slice(&random_pad);
 
-    // Outer AEAD encrypt
-    let outer_blob = crypto::outer_seal(password, &padded)?;
+    // Outer AEAD encrypt — derived from Argon2 with standard KDF params
+    let salt = container.salt_bytes()?;
+    let outer_params = crypto::KdfParams::recommended();
+    let outer_master = crypto::derive_master_secret(password, &salt, &outer_params)?;
+    let outer_key = crypto::derive_outer_key_from_master(&outer_master)?;
+    let outer_blob = crypto::outer_seal_with_key(&outer_key, &salt, &padded)?;
 
     // Raw bits (no CRC framing)
     let bits = stego::raw_bytes_to_bits(&outer_blob);
@@ -164,10 +223,21 @@ pub fn embed_with_options(
     }
 }
 
-/// Maximum bucket size for v4 extraction (64 KiB payloads).
+/// Maximum bucket size for v4 containers.
+///
+/// The extraction loop tries every bucket size from 64 up to this limit.
+/// To prevent embed-time surprises, embed enforces this same limit so a
+/// container that embeds successfully is guaranteed to be extractable.
 const V4_MAX_BUCKET: usize = 65536;
 
-/// Try v4 extraction: outer decrypt → unpad → parse → open.
+/// Maximum payload size (approximate) for v4 embed.
+///
+/// This accounts for container overhead (~49-byte header, 16-byte AEAD tag,
+/// 4-byte length prefix) and the bucket ceiling. Plaintext compression may
+/// allow slightly larger payloads, but we check after compression.
+const V4_MAX_PAYLOAD_DISPLAY: usize = V4_MAX_BUCKET - 100; // ~65,436 bytes
+
+/// Try v4 extraction: read salt → Argon2 (once) → outer decrypt → unpad → parse → open.
 ///
 /// Returns:
 /// - `Ok(Some(plaintext))` — v4 container found and decrypted successfully
@@ -178,22 +248,59 @@ fn try_v4_extract(
     raw_bytes: &[u8],
     password: &[u8],
     pepper: Option<&[u8]>,
-    pqc_sk: Option<&[u8]>,
+    _pqc_sk: Option<&[u8]>,
 ) -> Result<Option<SecureVec>> {
-    // Outer blob layout: nonce(24) + ciphertext(bucket + 16)
-    // So total = 24 + bucket + 16 = bucket + 40
+    // V4 outer blob layout: salt(16) || nonce(24) || ciphertext(bucket + 16_tag)
+    // Minimum size: 16 + 24 + 64 + 16 = 120 bytes (smallest bucket = 64)
+    let min_outer_len = crypto::OUTER_OVERHEAD + 64; // 56 + 64 = 120
+    if raw_bytes.len() < min_outer_len {
+        return Ok(None); // Not enough data for any v4 container
+    }
+
+    // Derive max candidate bucket from raw data length.
+    // blob_len = 16 + 24 + bucket + 16 = bucket + 56
+    // → bucket = blob_len - 56
+    // Cap at V4_MAX_BUCKET to match the embed-time limit.
+    let max_candidate = std::cmp::min(
+        raw_bytes.len().saturating_sub(crypto::OUTER_OVERHEAD),
+        V4_MAX_BUCKET,
+    );
+
+    // Read the Argon2 salt from the first 16 bytes (in the clear).
+    let salt = &raw_bytes[..16];
+
+    // We need to know the KDF params to run Argon2, but they're inside the
+    // encrypted container.  Try with recommended defaults first — the v4 embed
+    // path always stores the same KDF params used at embed time inside the
+    // container header, and re-derives the inner key from the master secret
+    // after parsing the header.  For the outer key we use the default params
+    // from the embed path.
+    //
+    // Strategy: try Argon2 with a series of plausible KDF configs.
+    // The standard embed uses `recommended()` defaults.  Custom configs
+    // are stored inside the container; we'll try the default first.
+    let default_params = crypto::KdfParams::recommended();
+
+    // Derive master secret once (expensive Argon2 — but only once).
+    let master = match crypto::derive_master_secret(password, salt, &default_params) {
+        Ok(m) => m,
+        Err(_) => return Ok(None), // Salt too short or invalid — not v4
+    };
+
+    let outer_key = crypto::derive_outer_key_from_master(&master)?;
+
+    // Try each bucket size
     let mut bucket = 64;
-    while bucket <= V4_MAX_BUCKET {
-        let blob_len = bucket + 40; // 24 nonce + bucket data + 16 AEAD tag
+    while bucket <= max_candidate {
+        // Outer blob size: salt(16) + nonce(24) + bucket_data + tag(16)
+        let blob_len = 16 + 24 + bucket + 16;
         if blob_len > raw_bytes.len() {
-            break; // Carrier doesn't have enough data for this bucket
+            break;
         }
 
         let blob = &raw_bytes[..blob_len];
-        if let Ok(padded) = crypto::outer_open(password, blob) {
+        if let Ok(padded) = crypto::outer_open(&outer_key, blob) {
             // ── Outer AEAD succeeded — this IS a v4 container ───────────
-            // From here, any failure is a real error (wrong pepper,
-            // corrupted data, etc.), NOT "wrong format". Propagate it.
             if padded.len() < 4 {
                 bail!("V4 outer decryption produced too few bytes.");
             }
@@ -213,7 +320,11 @@ fn try_v4_extract(
 
             // Parse v4 container
             let container = container::Snow2Container::from_bytes_v4(container_bytes)?;
-            let plaintext = container.open(password, pepper, pqc_sk)?;
+
+            // The inner AEAD key is derived from the container's own KDF
+            // params (which may differ from the outer layer's recommended
+            // defaults).  `open()` handles this derivation internally.
+            let plaintext = container.open(password, pepper, _pqc_sk)?;
             return Ok(Some(plaintext));
         }
         bucket += 64;
