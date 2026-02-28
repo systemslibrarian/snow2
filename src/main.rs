@@ -74,6 +74,16 @@ enum Commands {
         #[cfg(feature = "pqc")]
         #[arg(long)]
         pqc_pk: Option<String>,
+
+        /// (PQC) Path to secret key for signing (default: auto-discover from PK path).
+        #[cfg(feature = "pqc")]
+        #[arg(long)]
+        pqc_sk: Option<String>,
+
+        /// (PQC) Password for encrypted secret key file.
+        #[cfg(feature = "pqc")]
+        #[arg(long)]
+        pqc_sk_password: Option<String>,
     },
 
     /// Extract a message/file from a carrier text file
@@ -102,6 +112,11 @@ enum Commands {
         #[cfg(feature = "pqc")]
         #[arg(long)]
         pqc_sk: Option<String>,
+
+        /// (PQC) Password for encrypted secret key file.
+        #[cfg(feature = "pqc")]
+        #[arg(long)]
+        pqc_sk_password: Option<String>,
     },
 
     /// Generate a new PQC keypair (if feature is enabled).
@@ -113,6 +128,20 @@ enum Commands {
         /// Path for the new secret key file.
         #[arg(long)]
         sk_out: String,
+        /// Password to encrypt the secret key. If omitted, the key is stored unencrypted.
+        #[arg(long)]
+        sk_password: Option<String>,
+    },
+
+    /// Best-effort file shredding (overwrite + remove; see docs for SSD/CoW limits)
+    Shred {
+        /// Path to the file to securely delete
+        #[arg(long)]
+        path: String,
+
+        /// Number of overwrite passes (1–5, default: 3). A final random pass is always added.
+        #[arg(long, default_value_t = 3)]
+        passes: usize,
     },
 
     /// Scan a carrier for whitespace/normalization risk (informational)
@@ -144,8 +173,15 @@ fn main() -> Result<()> {
             kdf_par,
             #[cfg(feature = "pqc")]
             pqc_pk,
+            #[cfg(feature = "pqc")]
+            pqc_sk,
+            #[cfg(feature = "pqc")]
+            pqc_sk_password,
         } => {
+            #[cfg(feature = "pqc")]
             let pqc_enabled = pqc_pk.is_some();
+            #[cfg(not(feature = "pqc"))]
+            let pqc_enabled = false;
             let mut password = get_password(password, !pqc_enabled)?;
             let pepper = get_pepper(pepper)?;
             let res = cmd_embed(
@@ -162,6 +198,10 @@ fn main() -> Result<()> {
                 kdf_par,
                 #[cfg(feature = "pqc")]
                 pqc_pk.as_deref(),
+                #[cfg(feature = "pqc")]
+                pqc_sk.as_deref(),
+                #[cfg(feature = "pqc")]
+                pqc_sk_password.as_deref(),
             );
             password.zeroize();
             if let Some(mut p) = pepper {
@@ -178,8 +218,14 @@ fn main() -> Result<()> {
             pepper,
             #[cfg(feature = "pqc")]
             pqc_sk,
+            #[cfg(feature = "pqc")]
+            pqc_sk_password,
         } => {
-            let mut password = get_password(password, pqc_sk.is_none())?;
+            #[cfg(feature = "pqc")]
+            let pqc_sk_is_none = pqc_sk.is_none();
+            #[cfg(not(feature = "pqc"))]
+            let pqc_sk_is_none = true;
+            let mut password = get_password(password, pqc_sk_is_none)?;
             let pepper = get_pepper(pepper)?;
             let res = cmd_extract(
                 &mode,
@@ -189,6 +235,8 @@ fn main() -> Result<()> {
                 pepper.as_deref().map(|p| p.as_bytes()),
                 #[cfg(feature = "pqc")]
                 pqc_sk.as_deref(),
+                #[cfg(feature = "pqc")]
+                pqc_sk_password.as_deref(),
             );
             password.zeroize();
             if let Some(mut p) = pepper {
@@ -198,7 +246,9 @@ fn main() -> Result<()> {
         }
 
         #[cfg(feature = "pqc")]
-        Commands::PqcKeygen { pk_out, sk_out } => cmd_pqc_keygen(&pk_out, &sk_out),
+        Commands::PqcKeygen { pk_out, sk_out, sk_password } => cmd_pqc_keygen(&pk_out, &sk_out, sk_password.as_deref()),
+
+        Commands::Shred { path, passes } => cmd_shred(&path, passes),
 
         Commands::Scan { carrier } => cmd_scan(&carrier),
 
@@ -261,6 +311,8 @@ fn cmd_embed(
     kdf_iters: u32,
     kdf_par: u32,
     #[cfg(feature = "pqc")] pqc_pk_path: Option<&str>,
+    #[cfg(feature = "pqc")] pqc_sk_path: Option<&str>,
+    #[cfg(feature = "pqc")] pqc_sk_password: Option<&str>,
 ) -> Result<()> {
     if message.is_some() && input_path.is_some() {
         bail!("Use either --message or --input, not both.");
@@ -304,14 +356,21 @@ fn cmd_embed(
             let pk = snow2::pqc::PqPublicKey::from_bytes(&pk_bytes)?;
             opts.pqc_keys.pk = Some(pk);
 
-            // For roundtrip testing, we need the secret key too.
-            // In a real scenario, the embedder only has the public key.
-            // We'll assume the secret key is in the same directory with a .sk extension.
-            let sk_path = std::path::Path::new(pk_path).with_extension("sk");
-            if sk_path.exists() {
-                let sk_bytes = std::fs::read(&sk_path)
-                    .with_context(|| format!("Failed to read PQC secret key from {:?}", sk_path))?;
-                let sk = snow2::pqc::PqSecretKey::from_bytes(&sk_bytes)?;
+            // Load secret key: explicit path, or auto-discover from PK path
+            let sk_file_path = if let Some(explicit) = pqc_sk_path {
+                std::path::PathBuf::from(explicit)
+            } else {
+                std::path::Path::new(pk_path).with_extension("sk")
+            };
+
+            if sk_file_path.exists() {
+                let sk_bytes = std::fs::read(&sk_file_path)
+                    .with_context(|| format!("Failed to read PQC secret key from {:?}", sk_file_path))?;
+
+                // Auto-detect encrypted keys and decrypt if needed
+                let sk_pw = pqc_sk_password.map(|p| p.as_bytes());
+                let sk = snow2::pqc::PqSecretKey::load(&sk_bytes, sk_pw)
+                    .with_context(|| format!("Failed to load PQC secret key from {:?}", sk_file_path))?;
                 opts.pqc_keys.sk = Some(sk);
             }
         }
@@ -336,6 +395,7 @@ fn cmd_embed(
         .with_context(|| format!("write output carrier: {out_path}"))?;
 
     println!("OK: embedded {} bytes using mode {}", payload.len(), mode.as_str());
+    #[cfg(feature = "pqc")]
     if opts.security.pqc_enabled {
         println!("Encryption: PQC Hybrid (Kyber1024 + XChaCha20-Poly1305)");
     } else {
@@ -344,6 +404,11 @@ fn cmd_embed(
             kdf_mib, kdf_iters, kdf_par, pepper_required
         );
     }
+    #[cfg(not(feature = "pqc"))]
+    println!(
+        "KDF: Argon2id m={} MiB t={} p={} (pepper_required={})",
+        kdf_mib, kdf_iters, kdf_par, pepper_required
+    );
     println!("Wrote: {out_path}");
     Ok(())
 }
@@ -355,6 +420,7 @@ fn cmd_extract(
     password: &Zeroizing<String>,
     pepper: Option<&[u8]>,
     #[cfg(feature = "pqc")] pqc_sk_path: Option<&str>,
+    #[cfg(feature = "pqc")] pqc_sk_password: Option<&str>,
 ) -> Result<()> {
     let mode = Mode::parse(mode_s)?;
 
@@ -363,20 +429,33 @@ fn cmd_extract(
 
     #[cfg(feature = "pqc")]
     let pqc_sk = if let Some(path) = pqc_sk_path {
-        Some(
-            std::fs::read(path)
-                .with_context(|| format!("Failed to read PQC secret key from {}", path))?,
-        )
+        let sk_bytes = std::fs::read(path)
+            .with_context(|| format!("Failed to read PQC secret key from {}", path))?;
+
+        // Auto-detect encrypted keys and decrypt to raw bytes
+        if snow2::pqc::PqSecretKey::is_encrypted(&sk_bytes) {
+            let sk_pw = pqc_sk_password
+                .map(|p| p.as_bytes())
+                .ok_or_else(|| anyhow::anyhow!(
+                    "PQC secret key is encrypted; provide --pqc-sk-password to decrypt it."
+                ))?;
+            let sk = snow2::pqc::PqSecretKey::decrypt(&sk_bytes, sk_pw)?;
+            Some(sk.to_bytes())
+        } else {
+            Some(sk_bytes)
+        }
     } else {
         None
     };
+
+    #[cfg(not(feature = "pqc"))]
+    let pqc_sk: Option<&[u8]> = None;
 
     let payload = snow2::extract(
         mode,
         &carrier_text,
         password.as_bytes(),
         pepper,
-        #[cfg(feature = "pqc")]
         pqc_sk.as_deref(),
     )
     .context("extract failed")?;
@@ -390,29 +469,66 @@ fn cmd_extract(
 }
 
 #[cfg(feature = "pqc")]
-fn cmd_pqc_keygen(pk_path: &str, sk_path: &str) -> Result<()> {
+fn cmd_pqc_keygen(pk_path: &str, sk_path: &str, sk_password: Option<&str>) -> Result<()> {
     let (pk, sk) = snow2::pqc::keypair();
 
     let pk_bytes = pk.to_bytes();
-    let sk_bytes = sk.to_bytes();
 
-    std::fs::write(pk_path, &pk_bytes)
+    // Write public key (not sensitive — permissions are normal)
+    snow2::secure_fs::write_secure(pk_path, &pk_bytes, false)
         .with_context(|| format!("write public key to {}", pk_path))?;
-    std::fs::write(sk_path, &sk_bytes)
+
+    // Handle secret key encryption
+    let sk_bytes = if let Some(password) = sk_password {
+        let encrypted = sk.encrypt(password.as_bytes())
+            .context("encrypt secret key")?;
+        println!("Secret key encrypted with provided password.");
+        encrypted
+    } else {
+        eprintln!(
+            "WARNING: Secret key written WITHOUT encryption. \
+             Use --sk-password to protect it."
+        );
+        sk.to_bytes()
+    };
+
+    // Write secret key with hardened permissions (0o600 on Unix)
+    snow2::secure_fs::write_secure(sk_path, &sk_bytes, true)
         .with_context(|| format!("write secret key to {}", sk_path))?;
+
     println!("Wrote PQC keypair:");
     println!("  Public key: {} ({} bytes)", pk_path, pk_bytes.len());
-    println!("  Secret key: {} ({} bytes)", sk_path, sk_bytes.len());
+    println!("  Secret key: {} ({} bytes, encrypted={})", sk_path, sk_bytes.len(), sk_password.is_some());
+    Ok(())
+}
+
+fn cmd_shred(path: &str, passes: usize) -> Result<()> {
+    if !std::path::Path::new(path).exists() {
+        bail!("File not found: {}", path);
+    }
+
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("stat file: {}", path))?;
+    let size = metadata.len();
+
+    snow2::secure_fs::secure_delete(path, passes)
+        .with_context(|| format!("secure delete: {}", path))?;
+
+    println!(
+        "OK: shredded (best-effort) {} ({} bytes, {} pattern passes + 1 random pass)",
+        path, size, passes
+    );
     Ok(())
 }
 
 fn cmd_scan(carrier_path: &str) -> Result<()> {
-    let carrier_text = std::fs::read_to_string(carrier_path)
+    let carrier_bytes = std::fs::read(carrier_path)
         .with_context(|| format!("read carrier file: {carrier_path}"))?;
+    let carrier_text = String::from_utf8_lossy(&carrier_bytes);
 
     let total_lines = carrier_text.lines().count();
     let non_empty_lines = carrier_text.lines().filter(|l| !l.is_empty()).count();
-    let bytes = carrier_text.len();
+    let bytes = carrier_bytes.len();
 
     // Count zero-width characters
     let zw_chars: usize = carrier_text.chars().filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')).count();
@@ -422,20 +538,86 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
         .filter(|l| !l.is_empty() && (l.ends_with(' ') || l.ends_with('\t')))
         .count();
 
+    // Capacity estimates: each non-empty line carries 1 bit in both modes.
+    // We subtract 8 bytes (64 bits) for the bitstream framing header
+    // (4 bytes length + 4 bytes CRC-32).
+    let raw_bits = non_empty_lines;
+    let framing_overhead_bits: usize = 64; // length (32) + CRC-32 (32)
+    let usable_bits = raw_bits.saturating_sub(framing_overhead_bits);
+    let usable_bytes = usable_bits / 8;
+
+    // Detect line endings
+    let crlf_count = carrier_bytes.windows(2).filter(|w| w == b"\r\n").count();
+    let lf_only_count = carrier_bytes.iter().filter(|&&b| b == b'\n').count().saturating_sub(crlf_count);
+    let line_ending = if crlf_count > 0 && lf_only_count == 0 {
+        "CRLF (Windows)"
+    } else if crlf_count == 0 {
+        "LF (Unix)"
+    } else {
+        "Mixed CRLF/LF"
+    };
+
+    // Detect tabs in content (not trailing whitespace — those are stego)
+    let lines_with_tabs = carrier_text
+        .lines()
+        .filter(|l| l.contains('\t'))
+        .count();
+
     println!("Scan results for: {carrier_path}");
-    println!("  Length: {} bytes", bytes);
-    println!("  Lines: {}", total_lines);
-    println!("  Non-empty lines: {}", non_empty_lines);
-    println!("  Lines with trailing whitespace: {}", trailing_ws_lines);
-    println!("  Zero-width characters found: {}", zw_chars);
+    println!("  Length:        {} bytes", bytes);
+    println!("  Lines:         {} (non-empty: {})", total_lines, non_empty_lines);
+    println!("  Line endings:  {}", line_ending);
+    println!("  Trailing WS:   {} lines", trailing_ws_lines);
+    println!("  Zero-width:    {} characters", zw_chars);
+    println!("  Lines w/ tabs: {}", lines_with_tabs);
+    println!();
+    println!("  Stego capacity (1 bit/line, minus framing):");
+    println!("    Available:   {} bits = {} bytes", usable_bits, usable_bytes);
+
+    if usable_bytes < 64 {
+        println!("    WARNING: Very low capacity. Carrier may be too small for most payloads.");
+    }
+
+    // Diagnostics / warnings
+    let mut warnings = Vec::new();
+
+    if crlf_count > 0 {
+        warnings.push(
+            "CRLF line endings detected. Some editors/platforms may convert these to LF, \
+             destroying embedded data. Consider normalizing to LF before embedding."
+                .to_string(),
+        );
+    }
+
+    if lines_with_tabs > 0 {
+        warnings.push(format!(
+            "{} lines contain tab characters. Some editors auto-expand tabs to spaces, \
+             which would corrupt classic-trailing stego data.",
+            lines_with_tabs
+        ));
+    }
 
     if trailing_ws_lines > 0 {
-        println!();
-        println!("NOTE: Trailing whitespace detected. This carrier may already contain classic-trailing encoded data.");
+        warnings.push(format!(
+            "{} lines already have trailing whitespace. This carrier may already contain \
+             classic-trailing encoded data, or editors may strip trailing whitespace on save.",
+            trailing_ws_lines
+        ));
     }
+
     if zw_chars > 0 {
+        warnings.push(format!(
+            "{} zero-width characters found. This carrier may already contain \
+             websafe-zw encoded data.",
+            zw_chars
+        ));
+    }
+
+    if !warnings.is_empty() {
         println!();
-        println!("NOTE: Zero-width characters detected. This carrier may already contain websafe-zw encoded data.");
+        for (i, w) in warnings.iter().enumerate() {
+            println!("  WARNING {}: {}", i + 1, w);
+        }
     }
 
     Ok(())

@@ -99,6 +99,10 @@ impl Snow2Container {
             bail!("Pepper is required by policy, but no pepper was provided.");
         }
 
+        // Validate KDF params at embed time so we never create a container
+        // that our own extractor would reject.
+        opts.kdf.validate_extraction_bounds()?;
+
         // Generate per-message randomness
         let salt = crypto::random_bytes(16)?;
         let nonce = crypto::random_bytes(24)?; // XChaCha20-Poly1305 nonce length
@@ -198,7 +202,7 @@ impl Snow2Container {
         &self,
         password: &[u8],
         pepper: Option<&[u8]>,
-        pqc_sk: Option<&[u8]>,
+        _pqc_sk: Option<&[u8]>,
     ) -> Result<SecureVec> {
         // SECURITY: Constant-time magic check
         if self.header.magic.as_bytes().ct_eq(MAGIC).unwrap_u8() != 1 {
@@ -207,7 +211,7 @@ impl Snow2Container {
 
         #[cfg(feature = "pqc")]
         if self.header.version == PQC_VERSION {
-            let sk = pqc_sk.context("PQC container requires a secret key (--pqc-sk).")?;
+            let sk = _pqc_sk.context("PQC container requires a secret key (--pqc-sk).")?;
             return self.open_pqc(sk);
         }
 
@@ -233,6 +237,11 @@ impl Snow2Container {
             bail!("Pepper is required by this container, but none was provided.");
         }
 
+        // SECURITY: Validate KDF parameters from the (untrusted) container
+        // header before doing any expensive work. This prevents DoS via
+        // absurd memory/time cost values.
+        self.header.kdf.validate_extraction_bounds()?;
+
         let header_json = serde_json::to_vec(&self.header).context("serialize header (aad)")?;
         let salt_raw = STANDARD
             .decode(&self.header.salt_b64)
@@ -241,6 +250,10 @@ impl Snow2Container {
             .decode(&self.header.nonce_b64)
             .context("decode nonce_b64")?;
 
+        // Validate decoded lengths before passing to crypto primitives.
+        if salt_raw.len() < 16 {
+            bail!("Salt too short: {} bytes (expected 16).", salt_raw.len());
+        }
         if nonce.len() != 24 {
             bail!("Invalid nonce length: {} (expected 24).", nonce.len());
         }
@@ -377,6 +390,18 @@ impl Snow2Container {
                 .expect("slice length checked"),
         ) as usize;
 
+        // SECURITY: Cap header length to prevent absurdly large JSON
+        // allocations from a malicious container. 64 KiB is far more
+        // than any legitimate header will ever need.
+        const MAX_HEADER_LEN: usize = 64 * 1024;
+        if header_len > MAX_HEADER_LEN {
+            bail!(
+                "Header too large: {} bytes (max {}).",
+                header_len,
+                MAX_HEADER_LEN
+            );
+        }
+
         let header_start = 10;
         let header_end = header_start + header_len;
         if input.len() < header_end {
@@ -393,11 +418,13 @@ impl Snow2Container {
             bail!("Header version mismatch.");
         }
 
-        let mut ciphertext_start = header_end;
+        let ciphertext_start = header_end;
+        #[cfg(feature = "pqc")]
+        let mut ciphertext_start = ciphertext_start;
         #[cfg(feature = "pqc")]
         let mut pqc_signature: Option<Vec<u8>> = None;
         #[cfg(not(feature = "pqc"))]
-        let pqc_signature: Option<Vec<u8>> = None;
+        let _pqc_signature: Option<Vec<u8>> = None;
 
         #[cfg(feature = "pqc")]
         if version == PQC_VERSION {

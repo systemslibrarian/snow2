@@ -1,24 +1,31 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 pub mod classic_trailing;
 pub mod websafe_zw;
 
 /// Convert bytes to a bit vector (MSB-first per byte).
 ///
-/// IMPORTANT: We add a 4-byte little-endian length prefix so extraction
-/// knows exactly how many bytes to reconstruct.
+/// The bitstream is framed with a length prefix and a CRC-32 integrity checksum:
 ///
-/// Encoded stream:
-/// [len_u32_le][data...]
-pub fn bytes_to_bits(mut bytes: Vec<u8>) -> Vec<bool> {
+/// ```text
+/// [len_u32_le (4 bytes)][crc32_le (4 bytes)][data...]
+/// ```
+///
+/// The CRC-32 catches corruption in the steganographic layer (e.g. whitespace
+/// stripping, copy-paste mangling) before the container parser or AEAD sees it.
+pub fn bytes_to_bits(bytes: &[u8]) -> Result<Vec<bool>> {
     let len: u32 = bytes
         .len()
         .try_into()
-        .unwrap_or(u32::MAX); // extremely unlikely; we keep simple here
+        .map_err(|_| anyhow!("Payload too large for bitstream framing (max {} bytes).", u32::MAX))?;
 
-    let mut framed = Vec::with_capacity(4 + bytes.len());
+    // CRC-32 over the raw data payload
+    let crc = crc32fast::hash(bytes);
+
+    let mut framed = Vec::with_capacity(4 + 4 + bytes.len());
     framed.extend_from_slice(&len.to_le_bytes());
-    framed.append(&mut bytes);
+    framed.extend_from_slice(&crc.to_le_bytes());
+    framed.extend_from_slice(bytes);
 
     let mut bits = Vec::with_capacity(framed.len() * 8);
     for b in framed {
@@ -26,32 +33,51 @@ pub fn bytes_to_bits(mut bytes: Vec<u8>) -> Vec<bool> {
             bits.push(((b >> i) & 1) == 1);
         }
     }
-    bits
+    Ok(bits)
 }
 
-/// Convert bits back to bytes, using the 4-byte length prefix.
-/// Returns ONLY the data bytes (not including length prefix).
-pub fn bits_to_bytes(bits: &[bool]) -> Result<Vec<u8>> {
-    if bits.len() < 32 {
-        bail!("Not enough bits to contain length prefix.");
-    }
-
-    // Read first 32 bits as u32 LE length (byte order LE, but bits are MSB-first within each byte)
-    let mut len_bytes = [0u8; 4];
-    for byte_idx in 0..4 {
+/// Helper: read `count` bytes from `bits` starting at bit position `bit_offset`.
+/// Returns a `Vec<u8>` of `count` bytes.
+fn read_bytes_from_bits(bits: &[bool], bit_offset: usize, count: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(count);
+    for byte_i in 0..count {
         let mut b = 0u8;
-        for bit_idx in 0..8 {
-            let bit = bits[byte_idx * 8 + bit_idx];
+        for bit_j in 0..8 {
+            let bit = bits[bit_offset + byte_i * 8 + bit_j];
             b = (b << 1) | (bit as u8);
         }
-        len_bytes[byte_idx] = b;
+        out.push(b);
     }
+    out
+}
+
+/// Convert bits back to bytes, using the length + CRC-32 header.
+///
+/// Verifies the CRC-32 checksum before returning the data. Returns ONLY
+/// the data bytes (not including the 8-byte header).
+pub fn bits_to_bytes(bits: &[bool]) -> Result<Vec<u8>> {
+    // Need at least 64 bits for [len (32 bits)] + [crc (32 bits)]
+    if bits.len() < 64 {
+        bail!("Not enough bits to contain length + checksum prefix.");
+    }
+
+    // Read length (first 4 bytes / 32 bits)
+    let len_bytes_raw = read_bytes_from_bits(bits, 0, 4);
+    let mut len_bytes = [0u8; 4];
+    len_bytes.copy_from_slice(&len_bytes_raw);
     let data_len = u32::from_le_bytes(len_bytes) as usize;
 
-    let total_bytes = 4usize
+    // Read CRC (next 4 bytes / 32 bits)
+    let crc_bytes_raw = read_bytes_from_bits(bits, 32, 4);
+    let mut crc_bytes = [0u8; 4];
+    crc_bytes.copy_from_slice(&crc_bytes_raw);
+    let expected_crc = u32::from_le_bytes(crc_bytes);
+
+    // Validate total required length
+    let header_bytes = 8usize; // len + crc
+    let total_bytes = header_bytes
         .checked_add(data_len)
         .context("length overflow")?;
-
     let total_bits = total_bytes
         .checked_mul(8)
         .context("bit length overflow")?;
@@ -64,18 +90,19 @@ pub fn bits_to_bytes(bits: &[bool]) -> Result<Vec<u8>> {
         );
     }
 
-    let mut out = Vec::with_capacity(data_len);
+    // Extract data bytes (starting after the 8-byte header = bit 64)
+    let data = read_bytes_from_bits(bits, 64, data_len);
 
-    // Parse bytes starting at bit 32
-    let start = 32;
-    for byte_i in 0..data_len {
-        let mut b = 0u8;
-        for bit_j in 0..8 {
-            let bit = bits[start + byte_i * 8 + bit_j];
-            b = (b << 1) | (bit as u8);
-        }
-        out.push(b);
+    // Verify CRC-32
+    let actual_crc = crc32fast::hash(&data);
+    if actual_crc != expected_crc {
+        bail!(
+            "Bitstream integrity check failed (CRC-32 mismatch: expected {:08X}, got {:08X}). \
+             The carrier may have been corrupted (whitespace stripped, copy-paste mangled, etc.).",
+            expected_crc,
+            actual_crc
+        );
     }
 
-    Ok(out)
+    Ok(data)
 }

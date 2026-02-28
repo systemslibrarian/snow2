@@ -14,6 +14,9 @@ pub mod crypto;
 pub mod stego;
 pub mod secure_mem;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod secure_fs;
+
 #[cfg(feature = "pqc")]
 pub mod pqc;
 
@@ -62,7 +65,7 @@ pub fn embed(
     let container = container::Snow2Container::seal(payload, password, pepper, mode)?;
 
     // Step 2: bytes -> bits
-    let bits = stego::bytes_to_bits(container.to_bytes()?);
+    let bits = stego::bytes_to_bits(&container.to_bytes()?)?;
 
     // Step 3: embed bits
     match mode {
@@ -82,7 +85,7 @@ pub fn embed_with_options(
 ) -> Result<String> {
     let container =
         container::Snow2Container::seal_with_options(payload, password, pepper, mode, opts)?;
-    let bits = stego::bytes_to_bits(container.to_bytes()?);
+    let bits = stego::bytes_to_bits(&container.to_bytes()?)?;
 
     match mode {
         Mode::ClassicTrailing => stego::classic_trailing::embed_bits(carrier_text, &bits),

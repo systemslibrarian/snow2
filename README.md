@@ -54,15 +54,26 @@ SNOW2 upgrades the crypto model completely.
   - Misuse-resistant
   - Authenticated encryption (confidentiality + integrity)
 
-### Password Hardening
-- **Argon2id**
-  - Memory-hard
-  - GPU-resistant
+### Key Derivation (Domain-Separated)
+- **Argon2id** → master secret, then **HKDF-SHA256** expansion with domain labels
+  - Memory-hard, GPU-resistant
   - Tunable parameters (`--kdf-mib`, `--kdf-iters`, `--kdf-par`)
+  - Domain labels: `snow2/aead-key`, `snow2/pepper-binding`
+  - Pepper bound via HKDF salt — no concatenation ambiguity
+
+### Extraction-Side KDF Bounds
+- Untrusted container headers are validated **before** any expensive KDF work
+- Hard limits prevent denial-of-service via absurd memory/time cost values
+- Bounds: max 4 GiB memory, max 64 iterations, max 16 parallelism, min 8 MiB memory
+- Both embedding and extraction validate KDF params — you can't create un-extractable containers
+
+### Hardened Profile
+- `KdfParams::hardened()` — 256 MiB / t=4 / p=1 for high-value secrets
+- `EmbedSecurityOptions::hardened()` — hardened KDF + mandatory pepper
 
 ### Optional Pepper ("Signal Key")
 - A second secret never stored in the carrier
-- Combined into key derivation
+- Cryptographically bound via HKDF domain separation (not concatenation)
 - If missing or incorrect → decryption fails
 - Not required, but strongly encouraged
 
@@ -76,8 +87,14 @@ This is useful when you want "password + something else you know" by policy.
 
 ### Secure Memory
 - **SecureVec**: mlock'd, guard-paged, zeroize-on-drop memory buffers (native targets)
+- Intermediate plaintext from AEAD decryption is zeroized after copy to SecureVec
 - Passwords zeroized from memory after use
 - On WASM targets, falls back to zeroize-on-drop Vec wrappers (no mlock available)
+
+### Bitstream Integrity (CRC-32)
+- Container bytes are framed with a length prefix and CRC-32 checksum before stego embedding
+- Catches carrier corruption (whitespace stripping, copy-paste mangling) with a clear error
+  before the container parser or AEAD sees it
 
 ---
 
@@ -91,6 +108,10 @@ When enabled, containers use a **Version 2** format with:
 - **Dilithium5** (ML-DSA) — NIST-standardized lattice-based digital signatures
 - **Hybrid encryption** — Kyber KEM shared secret → HKDF → XChaCha20-Poly1305
 - **Authenticated containers** — every PQC container is signed with Dilithium5
+- **Encrypted key storage** — secret keys can be encrypted at rest with password-derived AEAD
+  - Versioned format (`SNOW2EK\0` magic + version byte) for future evolution
+  - Version byte authenticated as AEAD AAD to prevent downgrade attacks
+- **Hardened file permissions** — secret key files written with 0o600 (Unix) via atomic rename
 
 PQC mode does not use passwords. Instead, you generate a keypair and use key files.
 
@@ -102,6 +123,8 @@ cargo build --release --features pqc
 ### Generate a PQC keypair
 ```bash
 snow2 pqc-keygen --pk-out key.pk --sk-out key.sk
+# With encrypted secret key:
+snow2 pqc-keygen --pk-out key.pk --sk-out key.sk --sk-password "my password"
 ```
 
 ### Embed with PQC
@@ -121,6 +144,13 @@ snow2 extract \
   --carrier out.txt \
   --out recovered.txt \
   --pqc-sk key.sk
+# If key is encrypted:
+snow2 extract \
+  --mode classic-trailing \
+  --carrier out.txt \
+  --out recovered.txt \
+  --pqc-sk key.sk \
+  --pqc-sk-password "my password"
 ```
 
 > **Note:** PQC containers are significantly larger than password-based containers (~10 KB overhead for Kyber ciphertext + Dilithium signature). Ensure your carrier has enough lines.
@@ -138,7 +168,7 @@ SNOW2 supports multiple embedding strategies.
 - Most fragile (subject to whitespace trimming by editors/tools)
 
 ### `websafe-zw`
-- Zero-width Unicode character embedding (U+200B, U+200C, U+200D, U+FEFF)
+- Zero-width Unicode character embedding (U+200B, U+200C)
 - More copy/paste tolerant
 - Better suited for browser/WASM usage
 - Some platforms may strip zero-width characters
@@ -157,7 +187,12 @@ Many tools may:
 
 If the carrier changes, extraction will fail — intentionally. SNOW2 treats integrity as mandatory.
 
-Use the `scan` command to check a carrier for existing whitespace or zero-width characters before embedding.
+Use the `scan` command to check a carrier before embedding. It reports:
+- Stego capacity (bits/bytes available)
+- Line ending format (LF vs CRLF)
+- Tab character warnings (editor auto-expansion risk)
+- Existing trailing whitespace or zero-width characters
+- CRLF normalization risk warnings
 
 ---
 
@@ -201,11 +236,20 @@ cat recovered.bin
 ```
 
 ### 5) Scan a carrier
-Inspect a carrier file for existing embedded data or whitespace anomalies:
+Inspect a carrier file for capacity, existing embedded data, or corruption risks:
 
 ```bash
 snow2 scan --carrier carrier.txt
 ```
+
+### 6) Best-effort file shredding
+Overwrite and remove a file (see caveats below):
+
+```bash
+snow2 shred --path sensitive.txt --passes 3
+```
+
+> **Note:** File shredding is best-effort. On SSDs with wear-leveling, CoW filesystems (btrfs, ZFS), or journaling filesystems, overwritten data may persist in spare blocks, snapshots, or journals. For high-assurance deletion, use full-disk encryption and destroy the key.
 
 ---
 
@@ -256,9 +300,9 @@ Defaults are reasonable for interactive use, but you can harden:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--kdf-mib` | 64 | Memory cost in MiB |
-| `--kdf-iters` | 3 | Iterations / time cost |
-| `--kdf-par` | 1 | Parallelism |
+| `--kdf-mib` | 64 | Memory cost in MiB (min 8, max 4096) |
+| `--kdf-iters` | 3 | Iterations / time cost (min 1, max 64) |
+| `--kdf-par` | 1 | Parallelism (min 1, max 16) |
 
 Example:
 
@@ -286,16 +330,46 @@ SNOW2 uses a self-describing binary container:
 [MAGIC "SNOW2" (5)] [VERSION (1)] [HEADER_LEN u32 LE (4)] [HEADER_JSON] [CIPHERTEXT]
 ```
 
-- **Version 1** (classic): password-based, XChaCha20-Poly1305 AEAD
+- **Version 1** (classic): password-based, Argon2id → HKDF → XChaCha20-Poly1305 AEAD
 - **Version 2** (PQC): hybrid Kyber1024 + XChaCha20-Poly1305, signed with Dilithium5
 
 The header JSON is authenticated as AEAD additional data (AAD). It contains KDF parameters, salt, nonce, mode, and policy flags — all cryptographically bound to the ciphertext.
+
+Header length is capped at 64 KiB during parsing to prevent hostile allocation.
 
 PQC containers additionally include a Dilithium5 signature over the ciphertext, with the format:
 
 ```
 [MAGIC] [VERSION=2] [HEADER_LEN] [HEADER_JSON] [SIG_LEN u16 LE] [SIGNATURE] [CIPHERTEXT]
 ```
+
+### Encrypted Secret Key Format (PQC)
+
+```
+[SNOW2EK\0 (8)] [VERSION (1)] [SALT (16)] [NONCE (24)] [AEAD CIPHERTEXT]
+```
+
+Version byte is authenticated as AEAD AAD alongside the magic, preventing downgrade attacks.
+
+---
+
+## Security Model
+
+### What SNOW2 protects against
+- **Passive observers**: Carrier text looks normal; payload is invisible
+- **Wrong password/pepper**: AEAD authentication fails — no partial decryption
+- **Carrier tampering**: CRC-32 catches stego corruption before AEAD; AEAD catches everything else
+- **Header tampering**: Header JSON is AEAD AAD — any modification causes auth failure
+- **KDF DoS**: Extraction-side bounds reject absurd KDF parameters from hostile containers
+- **Weak KDF at embed time**: Embedding validates KDF params against the same bounds
+- **Key file exposure**: PQC secret keys can be encrypted at rest with password-derived AEAD
+- **File permission leaks**: Sensitive files written with restricted permissions via atomic rename
+
+### What SNOW2 does NOT protect against
+- **Active carrier modification**: If someone can modify the carrier text (trim whitespace, normalize Unicode), extraction will fail. This is by design — integrity is mandatory.
+- **Traffic analysis**: SNOW2 does not hide the fact that a file has been modified (file size changes, metadata, etc.)
+- **Guaranteed secure deletion**: File shredding is best-effort. SSDs, CoW filesystems, and journals may retain data.
+- **WASM security boundaries**: The browser demo uses zeroize-on-drop but cannot mlock memory
 
 ---
 
@@ -354,7 +428,7 @@ python3 -m http.server 8000 -d web_demo
 
 Then open http://localhost:8000.
 
-> **Important:** The browser demo is convenience UI, not the security boundary. Users should understand whitespace normalization risks when copy/pasting.
+> **Important:** The browser demo is convenience UI, not the security boundary. Users should understand whitespace normalization risks when copy/pasting. The WASM environment cannot use mlock and provides weaker memory protections than native builds.
 
 ---
 
@@ -365,12 +439,13 @@ src/
   main.rs             CLI entry point (clap)
   lib.rs              Library API (embed / extract / embed_with_options)
   config.rs           EmbedOptions, EmbedSecurityOptions, PqKeys
-  container.rs        SNOW2 container format (seal / open / serialize)
-  crypto.rs           AEAD, KDF (Argon2id), random bytes
+  container.rs        SNOW2 container format (seal / open / serialize / parse)
+  crypto.rs           AEAD, KDF (Argon2id + HKDF), extraction bounds, random bytes
   secure_mem.rs       SecureVec (mlock + guard pages on native, zeroize on WASM)
+  secure_fs.rs        Atomic writes, permission hardening, best-effort shredding
   pqc.rs              Post-quantum crypto: Kyber1024 + Dilithium5 [optional]
   stego/
-    mod.rs            Bit/byte conversion utilities
+    mod.rs            Bit/byte conversion + CRC-32 bitstream framing
     classic_trailing.rs   Trailing whitespace steganography
     websafe_zw.rs         Zero-width Unicode steganography
 snow2_wasm/           WASM crate for browser demo
@@ -378,7 +453,8 @@ snow2_wasm/           WASM crate for browser demo
 web_demo/             Static web UI (HTML/CSS/JS + WASM pkg)
 tests/
   roundtrip.rs        Classic embed/extract roundtrip tests
-  pepper_policy.rs    Pepper-required policy + KDF tuning tests
+  pepper_policy.rs    Pepper policy, KDF bounds, embed-side validation,
+                      malformed container rejection tests
   pqc_roundtrip.rs    PQC keygen + embed/extract roundtrip test
 scripts/
   make_carrier.sh     Helper to generate carrier files
