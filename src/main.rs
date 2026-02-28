@@ -340,6 +340,15 @@ fn cmd_embed(
     // Convert MiB -> KiB for Argon2 Params
     let m_cost_kib = kdf_mib.saturating_mul(1024);
 
+    // V4 requires m_cost_kib to be a power of 2 (for compact log2 encoding)
+    if !m_cost_kib.is_power_of_two() {
+        bail!(
+            "--kdf-mib {} is not a power of 2. \
+             Use a power of 2 (8, 16, 32, 64, 128, 256, 512).",
+            kdf_mib
+        );
+    }
+
     opts.security.kdf = KdfParams {
         m_cost_kib,
         t_cost: kdf_iters,

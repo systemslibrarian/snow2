@@ -128,6 +128,14 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
         );
     }
 
+    // Pre-generate all random bytes needed for padding lines in one OS RNG call.
+    // This is faster than calling random_bytes(1) per line and ensures maximum
+    // entropy quality from a single large read.
+    let padding_lines_count = usable.saturating_sub(lines_needed);
+    let padding_rand = crate::crypto::random_bytes(padding_lines_count)
+        .unwrap_or_else(|_| vec![0u8; padding_lines_count]);
+    let mut pad_idx = 0usize;
+
     let mut bit_idx = 0usize;
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
 
@@ -150,10 +158,9 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
             }
             out_lines.push(format!("{cleaned}{suffix}"));
         } else {
-            // Fill remaining lines with random ZW content
-            let random_bytes = crate::crypto::random_bytes(1)
-                .unwrap_or_else(|_| vec![0u8]);
-            let byte = random_bytes[0];
+            // Fill remaining lines with random ZW content from pre-generated buffer
+            let byte = padding_rand.get(pad_idx).copied().unwrap_or(0);
+            pad_idx += 1;
             let mut suffix = String::new();
             for i in 0..BITS_PER_LINE {
                 let bit = ((byte >> (7 - i)) & 1) == 1;

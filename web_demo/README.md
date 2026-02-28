@@ -36,8 +36,15 @@ Then open http://localhost:8000.
 
 1. `app.js` imports `embed_websafe_zw` and `extract_websafe_zw` from the WASM package
 2. The WASM module (`snow2_wasm`) wraps the snow2 Rust library with wasm-bindgen bindings
-3. Embedding creates a SNOW2 v1 container (Argon2id → HKDF-SHA256 domain-separated key derivation → XChaCha20-Poly1305 AEAD), converts it to a CRC-32-framed bitstream, and encodes **8 bits per carrier line** as zero-width Unicode characters (U+200B = 0, U+200C = 1) appended to each line
-4. Extraction validates KDF bounds from the container header, then reverses the process: strips zero-width characters from each line (up to 8 bits) → bitstream → CRC-32 check → container bytes → AEAD decrypt
+3. **Embedding** uses the v4 hardened pipeline:
+   - Builds a SNOW2 v4 container (optional deflate compression → Argon2id → HKDF-SHA256 domain-separated key → XChaCha20-Poly1305 inner AEAD)
+   - Pads to a constant-size bucket (multiples of 64 bytes) to mask message length
+   - Outer-encrypts the padded container with a BLAKE3-derived key + XChaCha20-Poly1305
+   - Converts to raw bits (no CRC framing — outer AEAD provides integrity)
+   - Embeds bits into carrier lines as zero-width Unicode (U+200B = 0, U+200C = 1), **8 bits per line**
+   - **Random-fills ALL remaining carrier lines** with random ZW content — eliminates statistical boundary between message and padding
+4. **Extraction** tries the v4 path first (extract all bits → try outer AEAD decrypt for each bucket size → unpad → parse v4 container → inner AEAD decrypt → optional inflate). Falls back to legacy CRC-framed path for v1/v3 containers.
+5. **Steg resistance**: The embedded bitstream is indistinguishable from uniform random noise (chi-squared ≈ 255 with 256/256 unique byte values). Every carrier line carries ZW content.
 
 ## File Structure
 

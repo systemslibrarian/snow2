@@ -116,6 +116,12 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
         );
     }
 
+    // Pre-generate all random bytes for padding lines in a single OS RNG call.
+    let padding_lines_count = usable.saturating_sub(bits.len());
+    let padding_rand = crate::crypto::random_bytes(padding_lines_count)
+        .unwrap_or_else(|_| vec![0u8; padding_lines_count]);
+    let mut pad_idx = 0usize;
+
     let mut bit_idx = 0usize;
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
 
@@ -133,10 +139,10 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
             out_lines.push(format!("{trimmed}{marker}"));
             bit_idx += 1;
         } else {
-            // Fill remaining lines with random trailing whitespace
-            let random_bytes = crate::crypto::random_bytes(1)
-                .unwrap_or_else(|_| vec![0u8]);
-            let marker = if (random_bytes[0] & 1) == 1 { '\t' } else { ' ' };
+            // Fill remaining lines with random trailing whitespace from pre-generated buffer
+            let byte = padding_rand.get(pad_idx).copied().unwrap_or(0);
+            pad_idx += 1;
+            let marker = if (byte & 1) == 1 { '\t' } else { ' ' };
             out_lines.push(format!("{trimmed}{marker}"));
         }
     }

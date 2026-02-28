@@ -164,13 +164,8 @@ pub fn embed_with_options(
     }
 }
 
-/// Authorized bucket sizes for v4 extraction.
-/// We try each one when extracting to determine the real data length
-/// without exposing size information in the clear.
-fn v4_bucket_sizes() -> Vec<usize> {
-    // Multiples of 64, from 64 up to 65536 (enough for 64 KiB payloads)
-    (1..=1024).map(|i| i * 64).collect()
-}
+/// Maximum bucket size for v4 extraction (64 KiB payloads).
+const V4_MAX_BUCKET: usize = 65536;
 
 /// Try v4 extraction: outer decrypt → unpad → parse → open.
 ///
@@ -187,7 +182,8 @@ fn try_v4_extract(
 ) -> Result<Option<SecureVec>> {
     // Outer blob layout: nonce(24) + ciphertext(bucket + 16)
     // So total = 24 + bucket + 16 = bucket + 40
-    for bucket in v4_bucket_sizes() {
+    let mut bucket = 64;
+    while bucket <= V4_MAX_BUCKET {
         let blob_len = bucket + 40; // 24 nonce + bucket data + 16 AEAD tag
         if blob_len > raw_bytes.len() {
             break; // Carrier doesn't have enough data for this bucket
@@ -220,6 +216,7 @@ fn try_v4_extract(
             let plaintext = container.open(password, pepper, pqc_sk)?;
             return Ok(Some(plaintext));
         }
+        bucket += 64;
     }
     Ok(None)
 }

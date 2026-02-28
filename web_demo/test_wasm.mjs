@@ -140,24 +140,33 @@ console.log("\n9. Non-UTF-8 binary payload (via base64)");
 }
 
 // ── 10. KDF bounds validation ────────────────────────────────────────
-console.log("\n10. KDF bounds validation");
+// The WASM layer CLAMPS out-of-range KDF values to browser-safe limits
+// rather than throwing, so these should all succeed (clamped silently).
+console.log("\n10. KDF bounds validation (WASM clamps, not rejects)");
 {
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 0, 1, 1),
-    null, "kdf_mib=0 rejected");
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 7, 1, 1),
-    null, "kdf_mib=7 rejected (below 8 MiB min)");
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 999999, 1, 1),
-    null, "kdf_mib=999999 rejected");
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 513, 1, 1),
-    null, "kdf_mib=513 rejected (above 512 MiB max)");
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 64, 65, 1),
-    null, "kdf_iters=65 rejected (above 64 max)");
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 64, 0, 1),
-    null, "kdf_iters=0 rejected");
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 64, 1, 17),
-    null, "kdf_par=17 rejected (above 16 max)");
-  throws(() => embed_websafe_zw(C, "t", "pw", null, false, 64, 1, 0),
-    null, "kdf_par=0 rejected");
+  // Below-min values get clamped UP to the minimum
+  const r0 = embed_websafe_zw(C, "t", "pw", null, false, 0, 1, 1);
+  ok(extract_websafe_zw(r0, "pw", null).as_utf8 === "t", "kdf_mib=0 clamped to 8, roundtrips");
+  const r7 = embed_websafe_zw(C, "t", "pw", null, false, 7, 1, 1);
+  ok(extract_websafe_zw(r7, "pw", null).as_utf8 === "t", "kdf_mib=7 clamped to 8, roundtrips");
+
+  // Above-max values get clamped DOWN to the maximum
+  const r999 = embed_websafe_zw(C, "t", "pw", null, false, 999999, 1, 1);
+  ok(extract_websafe_zw(r999, "pw", null).as_utf8 === "t", "kdf_mib=999999 clamped to 128, roundtrips");
+  const r513 = embed_websafe_zw(C, "t", "pw", null, false, 513, 1, 1);
+  ok(extract_websafe_zw(r513, "pw", null).as_utf8 === "t", "kdf_mib=513 clamped to 128, roundtrips");
+
+  // Iteration bounds
+  const ri65 = embed_websafe_zw(C, "t", "pw", null, false, 64, 65, 1);
+  ok(extract_websafe_zw(ri65, "pw", null).as_utf8 === "t", "kdf_iters=65 clamped to 8, roundtrips");
+  const ri0 = embed_websafe_zw(C, "t", "pw", null, false, 64, 0, 1);
+  ok(extract_websafe_zw(ri0, "pw", null).as_utf8 === "t", "kdf_iters=0 clamped to 1, roundtrips");
+
+  // Parallelism bounds
+  const rp17 = embed_websafe_zw(C, "t", "pw", null, false, 64, 1, 17);
+  ok(extract_websafe_zw(rp17, "pw", null).as_utf8 === "t", "kdf_par=17 clamped to 4, roundtrips");
+  const rp0 = embed_websafe_zw(C, "t", "pw", null, false, 64, 1, 0);
+  ok(extract_websafe_zw(rp0, "pw", null).as_utf8 === "t", "kdf_par=0 clamped to 1, roundtrips");
 }
 
 // ── 11. KDF at exact boundaries (should succeed) ─────────────────────
