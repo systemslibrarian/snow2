@@ -273,16 +273,6 @@ async function main() {
     }
   });
 
-  $("downloadRecovered").addEventListener("click", () => {
-    if (!recoveredB64) {
-      status(extractStatus, "err", "Nothing to download. Decrypt a message first.");
-      return;
-    }
-    const binStr = atob(recoveredB64);
-    const bytes = new Uint8Array(binStr.length);
-    for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-    downloadBytes("recovered.bin", bytes);
-  });
 
   function clearAll() {
     $("password").value = "";
