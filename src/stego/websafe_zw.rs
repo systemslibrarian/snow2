@@ -29,10 +29,13 @@ const BITS_PER_LINE: usize = 8;
 
 pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
     let mut lines: Vec<&str> = carrier_text.split('\n').collect();
-    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
+    let usable = lines
+        .iter()
+        .filter(|l| !l.trim_end_matches('\r').is_empty())
+        .count();
 
     // How many lines do we need?
-    let lines_needed = (bits.len() + BITS_PER_LINE - 1) / BITS_PER_LINE;
+    let lines_needed = bits.len().div_ceil(BITS_PER_LINE);
 
     if lines_needed > usable {
         bail!(
@@ -50,8 +53,8 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
 
     for line in lines.drain(..) {
         // Separate any trailing \r for CRLF preservation.
-        let (content, cr) = if line.ends_with('\r') {
-            (&line[..line.len() - 1], "\r")
+        let (content, cr) = if let Some(stripped) = line.strip_suffix('\r') {
+            (stripped, "\r")
         } else {
             (line, "")
         };
@@ -123,9 +126,12 @@ fn strip_trailing_zw(s: &str) -> String {
 /// line will have ZW content after embedding.
 pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Result<String> {
     let lines: Vec<&str> = carrier_text.split('\n').collect();
-    let usable = lines.iter().filter(|l| !l.trim_end_matches('\r').is_empty()).count();
+    let usable = lines
+        .iter()
+        .filter(|l| !l.trim_end_matches('\r').is_empty())
+        .count();
 
-    let lines_needed = (bits.len() + BITS_PER_LINE - 1) / BITS_PER_LINE;
+    let lines_needed = bits.len().div_ceil(BITS_PER_LINE);
 
     if lines_needed > usable {
         anyhow::bail!(
@@ -149,8 +155,8 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
 
     for line in &lines {
         // Separate any trailing \r for CRLF preservation.
-        let (content, cr) = if line.ends_with('\r') {
-            (&line[..line.len() - 1], "\r")
+        let (content, cr) = if let Some(stripped) = line.strip_suffix('\r') {
+            (stripped, "\r")
         } else {
             (*line, "")
         };
@@ -212,9 +218,7 @@ pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
         if trailing.is_empty() {
             // No ZW chars — could be an unmodified line in a mixed carrier.
             // Push 8 zero bits as filler so byte alignment is maintained.
-            for _ in 0..BITS_PER_LINE {
-                bits.push(false);
-            }
+            bits.resize(bits.len() + BITS_PER_LINE, false);
         } else {
             bits.extend(trailing.into_iter().rev());
         }
@@ -225,5 +229,8 @@ pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
 
 /// Count the number of usable (non-empty) lines in the carrier.
 pub fn usable_lines(carrier_text: &str) -> usize {
-    carrier_text.split('\n').filter(|l| !l.trim_end_matches('\r').is_empty()).count()
+    carrier_text
+        .split('\n')
+        .filter(|l| !l.trim_end_matches('\r').is_empty())
+        .count()
 }

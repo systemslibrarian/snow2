@@ -13,8 +13,8 @@
 pub mod config;
 pub mod container;
 pub mod crypto;
-pub mod stego;
 pub mod secure_mem;
+pub mod stego;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod secure_fs;
@@ -25,7 +25,7 @@ pub mod pqc;
 use anyhow::{bail, Result};
 use secure_mem::SecureVec;
 
-use flate2::write::{DeflateEncoder, DeflateDecoder};
+use flate2::write::{DeflateDecoder, DeflateEncoder};
 use flate2::Compression;
 use std::io::Write;
 
@@ -40,7 +40,9 @@ impl Mode {
     pub fn parse(s: &str) -> Result<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "classic-trailing" | "classic" | "trailing" => Ok(Self::ClassicTrailing),
-            "websafe-zw" | "websafe" | "zw" | "zero-width" | "zerowidth" => Ok(Self::WebSafeZeroWidth),
+            "websafe-zw" | "websafe" | "zw" | "zero-width" | "zerowidth" => {
+                Ok(Self::WebSafeZeroWidth)
+            }
             _ => bail!("Unknown mode: {s}. Expected: classic-trailing | websafe-zw"),
         }
     }
@@ -157,7 +159,9 @@ pub fn embed(
 
     // Embed + random-fill all remaining lines
     match mode {
-        Mode::ClassicTrailing => stego::classic_trailing::embed_bits_with_padding(carrier_text, &bits),
+        Mode::ClassicTrailing => {
+            stego::classic_trailing::embed_bits_with_padding(carrier_text, &bits)
+        }
         Mode::WebSafeZeroWidth => stego::websafe_zw::embed_bits_with_padding(carrier_text, &bits),
     }
 }
@@ -220,7 +224,9 @@ pub fn embed_with_options(
 
     // Embed + random-fill
     match mode {
-        Mode::ClassicTrailing => stego::classic_trailing::embed_bits_with_padding(carrier_text, &bits),
+        Mode::ClassicTrailing => {
+            stego::classic_trailing::embed_bits_with_padding(carrier_text, &bits)
+        }
         Mode::WebSafeZeroWidth => stego::websafe_zw::embed_bits_with_padding(carrier_text, &bits),
     }
 }
@@ -361,7 +367,7 @@ pub fn extract(
     match try_v4_extract(&raw_bytes, password, pepper, pqc_sk) {
         Ok(Some(plaintext)) => return Ok(plaintext),
         Err(e) => return Err(e), // v4 found but inner failed (wrong pepper, etc.)
-        Ok(None) => {}            // not v4 — fall through to legacy path
+        Ok(None) => {}           // not v4 — fall through to legacy path
     }
 
     // ── Legacy path: CRC framing → old container formats ────────────────

@@ -21,7 +21,11 @@ fn test_pqc_keygen() {
     cmd.args(&["pqc-keygen", "--pk-out", &pk, "--sk-out", &sk]);
 
     let (success, stdout, stderr) = run_command(&mut cmd);
-    assert!(success, "pqc-keygen failed. stdout: {}, stderr: {}", stdout, stderr);
+    assert!(
+        success,
+        "pqc-keygen failed. stdout: {}, stderr: {}",
+        stdout, stderr
+    );
 
     let pk_bytes = fs::read(&pk).unwrap();
     let sk_bytes = fs::read(&sk).unwrap();
@@ -54,32 +58,53 @@ fn test_pqc_roundtrip() {
     let mut keygen_cmd = Command::new("target/debug/snow2");
     keygen_cmd.args(&["pqc-keygen", "--pk-out", &pk_file, "--sk-out", &sk_file]);
     let (success, stdout, stderr) = run_command(&mut keygen_cmd);
-    assert!(success, "pqc-keygen failed. stdout: {}, stderr: {}", stdout, stderr);
+    assert!(
+        success,
+        "pqc-keygen failed. stdout: {}, stderr: {}",
+        stdout, stderr
+    );
 
     // 2. Embed
     let mut embed_cmd = Command::new("target/debug/snow2");
     embed_cmd.args(&[
         "embed",
-        "--mode", "classic-trailing",
-        "--carrier", &carrier_file,
-        "--out", &stego_file,
-        "--input", &input_file,
-        "--pqc-pk", &pk_file,
+        "--mode",
+        "classic-trailing",
+        "--carrier",
+        &carrier_file,
+        "--out",
+        &stego_file,
+        "--input",
+        &input_file,
+        "--pqc-pk",
+        &pk_file,
     ]);
     let (success, stdout, stderr) = run_command(&mut embed_cmd);
-    assert!(success, "embed --pqc-pk failed. stdout: {}, stderr: {}", stdout, stderr);
+    assert!(
+        success,
+        "embed --pqc-pk failed. stdout: {}, stderr: {}",
+        stdout, stderr
+    );
 
     // 3. Extract
     let mut extract_cmd = Command::new("target/debug/snow2");
     extract_cmd.args(&[
         "extract",
-        "--mode", "classic-trailing",
-        "--carrier", &stego_file,
-        "--out", &output_file,
-        "--pqc-sk", &sk_file,
+        "--mode",
+        "classic-trailing",
+        "--carrier",
+        &stego_file,
+        "--out",
+        &output_file,
+        "--pqc-sk",
+        &sk_file,
     ]);
     let (success, stdout, stderr) = run_command(&mut extract_cmd);
-    assert!(success, "extract --pqc-sk failed. stdout: {}, stderr: {}", stdout, stderr);
+    assert!(
+        success,
+        "extract --pqc-sk failed. stdout: {}, stderr: {}",
+        stdout, stderr
+    );
 
     // 4. Verify
     let original_message = fs::read_to_string(&input_file).unwrap();

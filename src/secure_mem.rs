@@ -34,7 +34,7 @@ mod inner {
             let aligned_data_len = if capacity == 0 {
                 page_size
             } else {
-                (capacity + page_size - 1) / page_size * page_size
+                capacity.div_ceil(page_size) * page_size
             };
 
             let total_alloc = aligned_data_len + page_size;
@@ -165,9 +165,7 @@ mod inner {
         }
 
         pub fn from_slice(data: &[u8]) -> Result<Self> {
-            Ok(Self {
-                buf: data.to_vec(),
-            })
+            Ok(Self { buf: data.to_vec() })
         }
 
         pub fn len(&self) -> usize {

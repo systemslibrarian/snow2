@@ -1,11 +1,7 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use snow2::{
-    config::EmbedOptions,
-    crypto::KdfParams,
-    Mode,
-};
+use snow2::{config::EmbedOptions, crypto::KdfParams, Mode};
 use zeroize::Zeroize;
 
 use zeroize::Zeroizing;
@@ -246,7 +242,11 @@ fn main() -> Result<()> {
         }
 
         #[cfg(feature = "pqc")]
-        Commands::PqcKeygen { pk_out, sk_out, sk_password } => cmd_pqc_keygen(&pk_out, &sk_out, sk_password.as_deref()),
+        Commands::PqcKeygen {
+            pk_out,
+            sk_out,
+            sk_password,
+        } => cmd_pqc_keygen(&pk_out, &sk_out, sk_password.as_deref()),
 
         Commands::Shred { path, passes } => cmd_shred(&path, passes),
 
@@ -298,6 +298,7 @@ fn get_pepper(pepper: Option<String>) -> Result<Option<Zeroizing<String>>> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_embed(
     mode_s: &str,
     carrier_path: &str,
@@ -373,13 +374,15 @@ fn cmd_embed(
             };
 
             if sk_file_path.exists() {
-                let sk_bytes = std::fs::read(&sk_file_path)
-                    .with_context(|| format!("Failed to read PQC secret key from {:?}", sk_file_path))?;
+                let sk_bytes = std::fs::read(&sk_file_path).with_context(|| {
+                    format!("Failed to read PQC secret key from {:?}", sk_file_path)
+                })?;
 
                 // Auto-detect encrypted keys and decrypt if needed
                 let sk_pw = pqc_sk_password.map(|p| p.as_bytes());
-                let sk = snow2::pqc::PqSecretKey::load(&sk_bytes, sk_pw)
-                    .with_context(|| format!("Failed to load PQC secret key from {:?}", sk_file_path))?;
+                let sk = snow2::pqc::PqSecretKey::load(&sk_bytes, sk_pw).with_context(|| {
+                    format!("Failed to load PQC secret key from {:?}", sk_file_path)
+                })?;
                 opts.pqc_keys.sk = Some(sk);
             }
         }
@@ -403,7 +406,11 @@ fn cmd_embed(
     snow2::secure_fs::write_secure(out_path, out_text.as_bytes(), false)
         .with_context(|| format!("write output carrier: {out_path}"))?;
 
-    println!("OK: embedded {} bytes using mode {}", payload.len(), mode.as_str());
+    println!(
+        "OK: embedded {} bytes using mode {}",
+        payload.len(),
+        mode.as_str()
+    );
     #[cfg(feature = "pqc")]
     if opts.security.pqc_enabled {
         println!("Encryption: PQC Hybrid (Kyber1024 + XChaCha20-Poly1305)");
@@ -443,11 +450,11 @@ fn cmd_extract(
 
         // Auto-detect encrypted keys and decrypt to raw bytes
         if snow2::pqc::PqSecretKey::is_encrypted(&sk_bytes) {
-            let sk_pw = pqc_sk_password
-                .map(|p| p.as_bytes())
-                .ok_or_else(|| anyhow::anyhow!(
+            let sk_pw = pqc_sk_password.map(|p| p.as_bytes()).ok_or_else(|| {
+                anyhow::anyhow!(
                     "PQC secret key is encrypted; provide --pqc-sk-password to decrypt it."
-                ))?;
+                )
+            })?;
             let sk = snow2::pqc::PqSecretKey::decrypt(&sk_bytes, sk_pw)?;
             Some(sk.to_zeroizing_bytes())
         } else {
@@ -472,7 +479,11 @@ fn cmd_extract(
     snow2::secure_fs::write_secure(out_path, &payload[..], true)
         .with_context(|| format!("write extracted payload: {out_path}"))?;
 
-    println!("OK: extracted {} bytes using mode {}", payload.len(), mode.as_str());
+    println!(
+        "OK: extracted {} bytes using mode {}",
+        payload.len(),
+        mode.as_str()
+    );
     println!("Wrote: {out_path}");
     Ok(())
 }
@@ -489,7 +500,8 @@ fn cmd_pqc_keygen(pk_path: &str, sk_path: &str, sk_password: Option<&str>) -> Re
 
     // Handle secret key encryption
     let mut sk_bytes = if let Some(password) = sk_password {
-        let encrypted = sk.encrypt(password.as_bytes())
+        let encrypted = sk
+            .encrypt(password.as_bytes())
             .context("encrypt secret key")?;
         println!("Secret key encrypted with provided password.");
         encrypted
@@ -511,7 +523,12 @@ fn cmd_pqc_keygen(pk_path: &str, sk_path: &str, sk_password: Option<&str>) -> Re
 
     println!("Wrote PQC keypair:");
     println!("  Public key: {} ({} bytes)", pk_path, pk_bytes.len());
-    println!("  Secret key: {} ({} bytes, encrypted={})", sk_path, sk_bytes.len(), sk_password.is_some());
+    println!(
+        "  Secret key: {} ({} bytes, encrypted={})",
+        sk_path,
+        sk_bytes.len(),
+        sk_password.is_some()
+    );
     Ok(())
 }
 
@@ -520,8 +537,7 @@ fn cmd_shred(path: &str, passes: usize) -> Result<()> {
         bail!("File not found: {}", path);
     }
 
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("stat file: {}", path))?;
+    let metadata = std::fs::metadata(path).with_context(|| format!("stat file: {}", path))?;
     let size = metadata.len();
 
     snow2::secure_fs::secure_delete(path, passes)
@@ -544,7 +560,10 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     let bytes = carrier_bytes.len();
 
     // Count zero-width characters (U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM)
-    let zw_chars: usize = carrier_text.chars().filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')).count();
+    let zw_chars: usize = carrier_text
+        .chars()
+        .filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+        .count();
 
     let trailing_ws_lines = carrier_text
         .lines()
@@ -592,7 +611,11 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
 
     // Detect line endings
     let crlf_count = carrier_bytes.windows(2).filter(|w| w == b"\r\n").count();
-    let lf_only_count = carrier_bytes.iter().filter(|&&b| b == b'\n').count().saturating_sub(crlf_count);
+    let lf_only_count = carrier_bytes
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
+        .saturating_sub(crlf_count);
     let line_ending = if crlf_count > 0 && lf_only_count == 0 {
         "CRLF (Windows)"
     } else if crlf_count == 0 {
@@ -602,10 +625,7 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     };
 
     // Detect tabs in content (not trailing whitespace — those are stego)
-    let lines_with_tabs = carrier_text
-        .lines()
-        .filter(|l| l.contains('\t'))
-        .count();
+    let lines_with_tabs = carrier_text.lines().filter(|l| l.contains('\t')).count();
 
     // ── Structural analysis ──────────────────────────────────────────
     // Check if carrier appears to already have structured embedded data.
@@ -629,7 +649,7 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
         let mut max_run = 0usize;
         let mut current_run = 0usize;
         for line in carrier_text.lines() {
-            if !line.is_empty() && line.ends_with(|c: char| c == '\u{200B}' || c == '\u{200C}') {
+            if !line.is_empty() && line.ends_with(['\u{200B}', '\u{200C}']) {
                 current_run += 1;
                 max_run = max_run.max(current_run);
             } else {
@@ -642,26 +662,45 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     // ── Output ───────────────────────────────────────────────────────
     println!("Scan results for: {carrier_path}");
     println!("  File size:     {} bytes", bytes);
-    println!("  Lines:         {} total, {} non-empty", total_lines, non_empty_lines);
+    println!(
+        "  Lines:         {} total, {} non-empty",
+        total_lines, non_empty_lines
+    );
     println!("  Line endings:  {}", line_ending);
-    println!("  Trailing WS:   {} lines (longest run: {})", trailing_ws_lines, consecutive_trailing);
-    println!("  Zero-width:    {} chars (longest run: {} lines)", zw_chars, consecutive_zw);
+    println!(
+        "  Trailing WS:   {} lines (longest run: {})",
+        trailing_ws_lines, consecutive_trailing
+    );
+    println!(
+        "  Zero-width:    {} chars (longest run: {} lines)",
+        zw_chars, consecutive_zw
+    );
     println!("  Lines w/ tabs: {}", lines_with_tabs);
     println!();
     println!("  Capacity:");
     println!("    classic-trailing (1 bit/line):");
-    println!("      Raw:         {} bits ({} bytes)", classic_raw_bits, classic_raw_bytes);
-    println!("      Payload max: ~{} bytes (after ~{} bytes overhead)",
-             classic_usable_bytes, total_overhead_bytes);
+    println!(
+        "      Raw:         {} bits ({} bytes)",
+        classic_raw_bits, classic_raw_bytes
+    );
+    println!(
+        "      Payload max: ~{} bytes (after ~{} bytes overhead)",
+        classic_usable_bytes, total_overhead_bytes
+    );
     if classic_usable_bytes == 0 {
         println!("      NOTE: Carrier is too small for classic-trailing with default settings.");
     } else if classic_usable_bytes < 64 {
         println!("      NOTE: Very low capacity for classic-trailing.");
     }
     println!("    websafe-zw (8 bits/line):");
-    println!("      Raw:         {} bits ({} bytes)", zw_raw_bits, zw_raw_bytes);
-    println!("      Payload max: ~{} bytes (after ~{} bytes overhead)",
-             zw_usable_bytes, total_overhead_bytes);
+    println!(
+        "      Raw:         {} bits ({} bytes)",
+        zw_raw_bits, zw_raw_bytes
+    );
+    println!(
+        "      Payload max: ~{} bytes (after ~{} bytes overhead)",
+        zw_usable_bytes, total_overhead_bytes
+    );
     if zw_usable_bytes == 0 {
         println!("      NOTE: Carrier is too small for websafe-zw with default settings.");
     } else if zw_usable_bytes < 64 {
@@ -671,20 +710,28 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
 
     // ── Fragility assessment per mode ────────────────────────────────
     println!("  Fragility notes:");
-    println!("    classic-trailing: {} trailing WS → {}",
-             if trailing_ws_lines > 0 { "PRESENT" } else { "none" },
-             if trailing_ws_lines > 0 {
-                 "may already contain data, or editors may strip on save"
-             } else {
-                 "clean carrier for this mode"
-             });
-    println!("    websafe-zw:       {} zero-width → {}",
-             if zw_chars > 0 { "PRESENT" } else { "none" },
-             if zw_chars > 0 {
-                 "may already contain data; some tools strip these chars"
-             } else {
-                 "clean carrier for this mode"
-             });
+    println!(
+        "    classic-trailing: {} trailing WS → {}",
+        if trailing_ws_lines > 0 {
+            "PRESENT"
+        } else {
+            "none"
+        },
+        if trailing_ws_lines > 0 {
+            "may already contain data, or editors may strip on save"
+        } else {
+            "clean carrier for this mode"
+        }
+    );
+    println!(
+        "    websafe-zw:       {} zero-width → {}",
+        if zw_chars > 0 { "PRESENT" } else { "none" },
+        if zw_chars > 0 {
+            "may already contain data; some tools strip these chars"
+        } else {
+            "clean carrier for this mode"
+        }
+    );
 
     // ── Warnings ─────────────────────────────────────────────────────
     let mut warnings = Vec::new();

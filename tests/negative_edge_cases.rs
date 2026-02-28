@@ -58,8 +58,7 @@ fn extract_from_single_line_carrier() {
 fn extract_from_lines_with_no_markers() {
     // Lines with no trailing whitespace — extractor should stop immediately
     let carrier = "line one\nline two\nline three\n";
-    let err =
-        snow2::extract(Mode::ClassicTrailing, carrier, b"pw", None, None).unwrap_err();
+    let err = snow2::extract(Mode::ClassicTrailing, carrier, b"pw", None, None).unwrap_err();
     let _msg = format!("{err:#}");
     // Should fail gracefully — no panic
 }
@@ -79,8 +78,7 @@ fn extract_from_truncated_stego_classic() {
     // Take only the first 10 lines (way too few to contain the full payload)
     let truncated: String = full.lines().take(10).collect::<Vec<_>>().join("\n");
 
-    let err = snow2::extract(Mode::ClassicTrailing, &truncated, password, None, None)
-        .unwrap_err();
+    let err = snow2::extract(Mode::ClassicTrailing, &truncated, password, None, None).unwrap_err();
     let _msg = format!("{err:#}");
     // Must not panic — should produce a clear error about insufficient data or CRC failure
 }
@@ -96,8 +94,7 @@ fn extract_from_truncated_stego_websafe() {
 
     let truncated: String = full.lines().take(10).collect::<Vec<_>>().join("\n");
 
-    let err = snow2::extract(Mode::WebSafeZeroWidth, &truncated, password, None, None)
-        .unwrap_err();
+    let err = snow2::extract(Mode::WebSafeZeroWidth, &truncated, password, None, None).unwrap_err();
     let _msg = format!("{err:#}");
 }
 
@@ -306,14 +303,7 @@ fn correct_password_wrong_pepper_still_fails() {
     .expect("embed should succeed");
 
     // Correct password, no pepper → should fail
-    let err = snow2::extract(
-        Mode::ClassicTrailing,
-        &out,
-        b"correct-pw",
-        None,
-        None,
-    )
-    .unwrap_err();
+    let err = snow2::extract(Mode::ClassicTrailing, &out, b"correct-pw", None, None).unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -353,14 +343,7 @@ fn large_payload_exceeding_carrier_capacity() {
     let carrier = "line one\nline two\nline three\n";
     let payload = vec![0xABu8; 10_000]; // much larger than capacity
 
-    let err = snow2::embed(
-        Mode::ClassicTrailing,
-        carrier,
-        &payload,
-        b"pw",
-        None,
-    )
-    .unwrap_err();
+    let err = snow2::embed(Mode::ClassicTrailing, carrier, &payload, b"pw", None).unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -374,14 +357,7 @@ fn large_payload_exceeding_websafe_capacity() {
     let carrier = "line one\nline two\nline three\n";
     let payload = vec![0xCDu8; 10_000];
 
-    let err = snow2::embed(
-        Mode::WebSafeZeroWidth,
-        carrier,
-        &payload,
-        b"pw",
-        None,
-    )
-    .unwrap_err();
+    let err = snow2::embed(Mode::WebSafeZeroWidth, carrier, &payload, b"pw", None).unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -434,12 +410,11 @@ fn pepper_required_with_empty_pepper_is_an_error() {
     let carrier = big_carrier(5000);
     let payload = b"test";
 
-    let mut sec = EmbedSecurityOptions::default();
-    sec.pepper_required = true;
-    let opts = EmbedOptions {
-        security: sec,
-        ..Default::default()
+    let sec = EmbedSecurityOptions {
+        pepper_required: true,
+        ..EmbedSecurityOptions::default()
     };
+    let opts = EmbedOptions { security: sec };
 
     // Empty pepper slice should NOT count as "provided"
     // This depends on implementation — document the behavior
@@ -511,8 +486,7 @@ fn carrier_with_only_empty_lines_websafe() {
     let carrier = "\n\n\n\n\n";
     let payload = b"test";
 
-    let err =
-        snow2::embed(Mode::WebSafeZeroWidth, carrier, payload, b"pw", None).unwrap_err();
+    let err = snow2::embed(Mode::WebSafeZeroWidth, carrier, payload, b"pw", None).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
         msg.to_lowercase().contains("too small") || msg.to_lowercase().contains("carrier"),
@@ -540,7 +514,8 @@ fn bits_to_bytes_exactly_64_bits_declares_nonzero_length() {
     // nothing after the header → should fail
     let mut bits = Vec::new();
     // length = 1 (LE: 0x01 0x00 0x00 0x00)
-    for &b in &[0u8, 0, 0, 0, 0, 0, 0, 1u8] {  // bit 7 (LSBit of byte 0)
+    for &b in &[0u8, 0, 0, 0, 0, 0, 0, 1u8] {
+        // bit 7 (LSBit of byte 0)
         for i in (0..8).rev() {
             bits.push(((b >> i) & 1) == 1);
         }
@@ -606,7 +581,10 @@ fn mode_parse_rejects_garbage() {
 fn mode_parse_accepts_aliases() {
     assert_eq!(Mode::parse("classic").unwrap(), Mode::ClassicTrailing);
     assert_eq!(Mode::parse("trailing").unwrap(), Mode::ClassicTrailing);
-    assert_eq!(Mode::parse("classic-trailing").unwrap(), Mode::ClassicTrailing);
+    assert_eq!(
+        Mode::parse("classic-trailing").unwrap(),
+        Mode::ClassicTrailing
+    );
     assert_eq!(Mode::parse("websafe-zw").unwrap(), Mode::WebSafeZeroWidth);
     assert_eq!(Mode::parse("websafe").unwrap(), Mode::WebSafeZeroWidth);
     assert_eq!(Mode::parse("zw").unwrap(), Mode::WebSafeZeroWidth);
@@ -615,7 +593,10 @@ fn mode_parse_accepts_aliases() {
 
 #[test]
 fn mode_parse_is_case_insensitive() {
-    assert_eq!(Mode::parse("CLASSIC-TRAILING").unwrap(), Mode::ClassicTrailing);
+    assert_eq!(
+        Mode::parse("CLASSIC-TRAILING").unwrap(),
+        Mode::ClassicTrailing
+    );
     assert_eq!(Mode::parse("WebSafe-ZW").unwrap(), Mode::WebSafeZeroWidth);
 }
 
@@ -629,7 +610,7 @@ fn classic_extract_stops_at_first_non_marker_line() {
     // Should get exactly 2 bits (from "hello " and "world\t"), then stop at "plain line"
     assert_eq!(bits.len(), 2);
     assert!(!bits[0]); // space = 0
-    assert!(bits[1]);  // tab = 1
+    assert!(bits[1]); // tab = 1
 }
 
 #[test]
@@ -640,5 +621,5 @@ fn websafe_extract_stops_at_first_non_marker_line() {
     let bits = snow2::stego::websafe_zw::extract_bits(&carrier).unwrap();
     assert_eq!(bits.len(), 2);
     assert!(!bits[0]); // ZWSP = 0
-    assert!(bits[1]);  // ZWNJ = 1
+    assert!(bits[1]); // ZWNJ = 1
 }

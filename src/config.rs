@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "pqc")]
 use crate::pqc::{PqPublicKey, PqSecretKey};
+use serde::{Deserialize, Serialize};
 
 use crate::crypto::KdfParams;
 

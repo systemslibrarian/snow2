@@ -633,6 +633,7 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "snow2",
+ "zeroize",
 ]
 
 [[package]]

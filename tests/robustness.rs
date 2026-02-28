@@ -37,14 +37,7 @@ fn outer_layer_requires_correct_password() {
     )
     .expect("embed should succeed");
 
-    let err = snow2::extract(
-        Mode::ClassicTrailing,
-        &stego,
-        b"wrong-pw",
-        None,
-        None,
-    )
-    .unwrap_err();
+    let err = snow2::extract(Mode::ClassicTrailing, &stego, b"wrong-pw", None, None).unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -63,9 +56,11 @@ fn outer_layer_does_not_bind_pepper() {
     let carrier = big_carrier(6000);
     let payload = b"pepper test";
 
-    let mut sec = EmbedSecurityOptions::default();
-    sec.pepper_required = true;
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let sec = EmbedSecurityOptions {
+        pepper_required: true,
+        ..EmbedSecurityOptions::default()
+    };
+    let opts = EmbedOptions { security: sec };
 
     let stego = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -137,14 +132,7 @@ fn embed_rejects_payload_exceeding_bucket_limit() {
         *b = state as u8;
     }
 
-    let err = snow2::embed(
-        Mode::ClassicTrailing,
-        &carrier,
-        &payload,
-        b"pw",
-        None,
-    )
-    .unwrap_err();
+    let err = snow2::embed(Mode::ClassicTrailing, &carrier, &payload, b"pw", None).unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -158,23 +146,11 @@ fn embed_succeeds_for_payload_within_limit() {
     let carrier = big_carrier(60_000);
     let payload = vec![0xCDu8; 1000]; // comfortably within limit
 
-    let stego = snow2::embed(
-        Mode::ClassicTrailing,
-        &carrier,
-        &payload,
-        b"pw",
-        None,
-    )
-    .expect("embed of 1 KiB payload should succeed");
+    let stego = snow2::embed(Mode::ClassicTrailing, &carrier, &payload, b"pw", None)
+        .expect("embed of 1 KiB payload should succeed");
 
-    let recovered = snow2::extract(
-        Mode::ClassicTrailing,
-        &stego,
-        b"pw",
-        None,
-        None,
-    )
-    .expect("extract should succeed");
+    let recovered = snow2::extract(Mode::ClassicTrailing, &stego, b"pw", None, None)
+        .expect("extract should succeed");
 
     assert_eq!(&*recovered, &payload[..]);
 }
@@ -183,17 +159,10 @@ fn embed_succeeds_for_payload_within_limit() {
 fn carrier_soft_cap_rejects_huge_carrier() {
     // Build a carrier larger than 10 MiB
     let line = "x".repeat(200);
-    let lines: Vec<&str> = std::iter::repeat(line.as_str()).take(60_000).collect();
+    let lines: Vec<&str> = std::iter::repeat_n(line.as_str(), 60_000).collect();
     let carrier = lines.join("\n"); // ~12 MiB+
 
-    let err = snow2::embed(
-        Mode::ClassicTrailing,
-        &carrier,
-        b"test",
-        b"pw",
-        None,
-    )
-    .unwrap_err();
+    let err = snow2::embed(Mode::ClassicTrailing, &carrier, b"test", b"pw", None).unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -289,11 +258,7 @@ fn classic_no_marker_after_bare_cr() {
     for line in result.split('\n') {
         if line.contains('\r') {
             // The \r should be at the very end of the line piece
-            assert!(
-                line.ends_with('\r'),
-                "\\r should be at the end: {:?}",
-                line
-            );
+            assert!(line.ends_with('\r'), "\\r should be at the end: {:?}", line);
         }
     }
 }
@@ -312,7 +277,10 @@ fn truncated_carrier_fails_gracefully_classic() {
     let truncated: String = stego.lines().take(20).collect::<Vec<_>>().join("\n");
 
     let result = snow2::extract(Mode::ClassicTrailing, &truncated, b"pw", None, None);
-    assert!(result.is_err(), "extraction from truncated carrier should fail");
+    assert!(
+        result.is_err(),
+        "extraction from truncated carrier should fail"
+    );
 }
 
 #[test]
@@ -326,7 +294,10 @@ fn truncated_carrier_fails_gracefully_websafe() {
     let truncated: String = stego.lines().take(20).collect::<Vec<_>>().join("\n");
 
     let result = snow2::extract(Mode::WebSafeZeroWidth, &truncated, b"pw", None, None);
-    assert!(result.is_err(), "extraction from truncated carrier should fail");
+    assert!(
+        result.is_err(),
+        "extraction from truncated carrier should fail"
+    );
 }
 
 // ── Robustness: corrupted markers ────────────────────────────────────
@@ -347,7 +318,10 @@ fn corrupted_trailing_whitespace_fails() {
         .join("\n");
 
     let result = snow2::extract(Mode::ClassicTrailing, &corrupted, b"pw", None, None);
-    assert!(result.is_err(), "extraction from stripped carrier should fail");
+    assert!(
+        result.is_err(),
+        "extraction from stripped carrier should fail"
+    );
 }
 
 #[test]
@@ -359,12 +333,13 @@ fn corrupted_zw_chars_fails() {
         .expect("embed should succeed");
 
     // Strip all zero-width chars
-    let corrupted = stego
-        .replace('\u{200B}', "")
-        .replace('\u{200C}', "");
+    let corrupted = stego.replace(['\u{200B}', '\u{200C}'], "");
 
     let result = snow2::extract(Mode::WebSafeZeroWidth, &corrupted, b"pw", None, None);
-    assert!(result.is_err(), "extraction from stripped carrier should fail");
+    assert!(
+        result.is_err(),
+        "extraction from stripped carrier should fail"
+    );
 }
 
 // ── Robustness: wrong password / wrong pepper / wrong mode ───────────
@@ -377,8 +352,7 @@ fn wrong_password_classic() {
     let stego = snow2::embed(Mode::ClassicTrailing, &carrier, payload, b"right", None)
         .expect("embed should succeed");
 
-    let err = snow2::extract(Mode::ClassicTrailing, &stego, b"wrong", None, None)
-        .unwrap_err();
+    let err = snow2::extract(Mode::ClassicTrailing, &stego, b"wrong", None, None).unwrap_err();
     let msg = format!("{err:#}").to_lowercase();
     assert!(
         msg.contains("decrypt") || msg.contains("auth") || msg.contains("password"),
@@ -394,8 +368,7 @@ fn wrong_password_websafe() {
     let stego = snow2::embed(Mode::WebSafeZeroWidth, &carrier, payload, b"right", None)
         .expect("embed should succeed");
 
-    let err = snow2::extract(Mode::WebSafeZeroWidth, &stego, b"wrong", None, None)
-        .unwrap_err();
+    let err = snow2::extract(Mode::WebSafeZeroWidth, &stego, b"wrong", None, None).unwrap_err();
     let msg = format!("{err:#}").to_lowercase();
     assert!(
         msg.contains("decrypt") || msg.contains("auth") || msg.contains("password"),
@@ -522,9 +495,9 @@ fn v4_container_invalid_mode_bits() {
     let mut blob = vec![4u8]; // version
     let mut hdr = vec![0u8; 49];
     hdr[0] = 0x0C; // mode bits = 3 (invalid)
-    hdr[1] = 16;   // m_cost_log2 = 16 (64 MiB)
-    hdr[2] = 3;    // t_cost = 3
-    hdr[4] = 1;    // p_cost = 1
+    hdr[1] = 16; // m_cost_log2 = 16 (64 MiB)
+    hdr[2] = 3; // t_cost = 3
+    hdr[4] = 1; // p_cost = 1
     blob.extend_from_slice(&hdr);
     blob.extend_from_slice(&[0xAA; 32]); // fake ciphertext
 
@@ -553,7 +526,10 @@ fn v4_container_too_short_for_ciphertext() {
 fn legacy_container_bad_magic() {
     let err = Snow2Container::from_bytes(b"WRONG\x01\x00\x00\x00\x00...").unwrap_err();
     let msg = format!("{err:#}").to_lowercase();
-    assert!(msg.contains("not a snow2"), "expected magic error, got: {msg}");
+    assert!(
+        msg.contains("not a snow2"),
+        "expected magic error, got: {msg}"
+    );
 }
 
 #[test]
@@ -647,26 +623,14 @@ fn embed_with_hardened_kdf_roundtrips() {
         kdf: snow2::crypto::KdfParams::hardened(),
         pepper_required: false,
     };
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let opts = EmbedOptions { security: sec };
 
-    let stego = snow2::embed_with_options(
-        Mode::ClassicTrailing,
-        &carrier,
-        payload,
-        b"pw",
-        None,
-        &opts,
-    )
-    .expect("embed with hardened KDF should succeed");
+    let stego =
+        snow2::embed_with_options(Mode::ClassicTrailing, &carrier, payload, b"pw", None, &opts)
+            .expect("embed with hardened KDF should succeed");
 
-    let recovered = snow2::extract(
-        Mode::ClassicTrailing,
-        &stego,
-        b"pw",
-        None,
-        None,
-    )
-    .expect("extract should succeed even though outer uses hardened profile");
+    let recovered = snow2::extract(Mode::ClassicTrailing, &stego, b"pw", None, None)
+        .expect("extract should succeed even though outer uses hardened profile");
 
     assert_eq!(&*recovered, payload);
 }
@@ -678,23 +642,11 @@ fn embed_default_then_extract_still_works() {
     let carrier = big_carrier(5000);
     let payload = b"default kdf roundtrip";
 
-    let stego = snow2::embed(
-        Mode::ClassicTrailing,
-        &carrier,
-        payload,
-        b"pw",
-        None,
-    )
-    .expect("embed should succeed");
+    let stego = snow2::embed(Mode::ClassicTrailing, &carrier, payload, b"pw", None)
+        .expect("embed should succeed");
 
-    let recovered = snow2::extract(
-        Mode::ClassicTrailing,
-        &stego,
-        b"pw",
-        None,
-        None,
-    )
-    .expect("extract should succeed");
+    let recovered = snow2::extract(Mode::ClassicTrailing, &stego, b"pw", None, None)
+        .expect("extract should succeed");
 
     assert_eq!(&*recovered, payload);
 }

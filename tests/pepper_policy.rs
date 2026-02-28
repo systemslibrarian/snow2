@@ -1,4 +1,9 @@
-use snow2::{config::{EmbedOptions, EmbedSecurityOptions}, crypto::KdfParams, Mode, container::Snow2Container};
+use snow2::{
+    config::{EmbedOptions, EmbedSecurityOptions},
+    container::Snow2Container,
+    crypto::KdfParams,
+    Mode,
+};
 
 fn big_carrier(lines: usize) -> String {
     (0..lines)
@@ -12,9 +17,11 @@ fn pepper_required_blocks_missing_pepper_on_embed() {
     let carrier = big_carrier(6000);
     let payload = b"hello";
 
-    let mut sec = EmbedSecurityOptions::default();
-    sec.pepper_required = true;
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let sec = EmbedSecurityOptions {
+        pepper_required: true,
+        ..EmbedSecurityOptions::default()
+    };
+    let opts = EmbedOptions { security: sec };
 
     let err = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -38,9 +45,11 @@ fn pepper_required_blocks_missing_pepper_on_extract() {
     let carrier = big_carrier(6000);
     let payload = b"hello";
 
-    let mut sec = EmbedSecurityOptions::default();
-    sec.pepper_required = true;
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let sec = EmbedSecurityOptions {
+        pepper_required: true,
+        ..EmbedSecurityOptions::default()
+    };
+    let opts = EmbedOptions { security: sec };
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -73,15 +82,16 @@ fn kdf_tuning_roundtrip_still_works() {
     let carrier = big_carrier(8000);
     let payload = b"kdf tuning test";
 
-    let mut sec = EmbedSecurityOptions::default();
-    sec.pepper_required = true;
-    sec.kdf = KdfParams {
-        m_cost_kib: 128 * 1024, // 128 MiB
-        t_cost: 4,
-        p_cost: 1,
-        out_len: 32,
+    let sec = EmbedSecurityOptions {
+        pepper_required: true,
+        kdf: KdfParams {
+            m_cost_kib: 128 * 1024, // 128 MiB
+            t_cost: 4,
+            p_cost: 1,
+            out_len: 32,
+        },
     };
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let opts = EmbedOptions { security: sec };
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -178,7 +188,7 @@ fn hardened_profile_roundtrip() {
     let payload = b"hardened profile test";
 
     let sec = EmbedSecurityOptions::hardened();
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let opts = EmbedOptions { security: sec };
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -212,24 +222,20 @@ fn embed_rejects_weak_kdf_at_seal_time() {
     let carrier = big_carrier(6000);
     let payload = b"hello";
 
-    let mut sec = EmbedSecurityOptions::default();
-    sec.kdf = KdfParams {
-        m_cost_kib: 1024, // 1 MiB — way below 8 MiB minimum
-        t_cost: 3,
-        p_cost: 1,
-        out_len: 32,
+    let sec = EmbedSecurityOptions {
+        kdf: KdfParams {
+            m_cost_kib: 1024, // 1 MiB — way below 8 MiB minimum
+            t_cost: 3,
+            p_cost: 1,
+            out_len: 32,
+        },
+        ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let opts = EmbedOptions { security: sec };
 
-    let err = snow2::embed_with_options(
-        Mode::ClassicTrailing,
-        &carrier,
-        payload,
-        b"pw",
-        None,
-        &opts,
-    )
-    .unwrap_err();
+    let err =
+        snow2::embed_with_options(Mode::ClassicTrailing, &carrier, payload, b"pw", None, &opts)
+            .unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -243,24 +249,20 @@ fn embed_rejects_absurd_kdf_at_seal_time() {
     let carrier = big_carrier(6000);
     let payload = b"hello";
 
-    let mut sec = EmbedSecurityOptions::default();
-    sec.kdf = KdfParams {
-        m_cost_kib: u32::MAX,
-        t_cost: 3,
-        p_cost: 1,
-        out_len: 32,
+    let sec = EmbedSecurityOptions {
+        kdf: KdfParams {
+            m_cost_kib: u32::MAX,
+            t_cost: 3,
+            p_cost: 1,
+            out_len: 32,
+        },
+        ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec, ..Default::default() };
+    let opts = EmbedOptions { security: sec };
 
-    let err = snow2::embed_with_options(
-        Mode::ClassicTrailing,
-        &carrier,
-        payload,
-        b"pw",
-        None,
-        &opts,
-    )
-    .unwrap_err();
+    let err =
+        snow2::embed_with_options(Mode::ClassicTrailing, &carrier, payload, b"pw", None, &opts)
+            .unwrap_err();
 
     let msg = format!("{err:#}");
     assert!(
@@ -316,7 +318,8 @@ fn kdf_bounds_accepts_max_m_cost() {
         p_cost: 1,
         out_len: 32,
     };
-    params.validate_extraction_bounds()
+    params
+        .validate_extraction_bounds()
         .expect("exactly-at-max m_cost should pass");
 }
 
@@ -346,7 +349,8 @@ fn kdf_bounds_accepts_min_m_cost() {
         p_cost: 1,
         out_len: 32,
     };
-    params.validate_extraction_bounds()
+    params
+        .validate_extraction_bounds()
         .expect("exactly-at-min m_cost should pass");
 }
 
@@ -375,7 +379,8 @@ fn kdf_bounds_accepts_max_t_cost() {
         p_cost: 1,
         out_len: 32,
     };
-    params.validate_extraction_bounds()
+    params
+        .validate_extraction_bounds()
         .expect("exactly-at-max t_cost should pass");
 }
 
@@ -403,7 +408,8 @@ fn kdf_bounds_accepts_max_p_cost() {
         p_cost: 16,
         out_len: 32,
     };
-    params.validate_extraction_bounds()
+    params
+        .validate_extraction_bounds()
         .expect("exactly-at-max p_cost should pass");
 }
 
@@ -440,7 +446,11 @@ fn write_secure_creates_file_atomically() {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
         .collect();
-    assert!(temps.is_empty(), "temp file was not cleaned up: {:?}", temps);
+    assert!(
+        temps.is_empty(),
+        "temp file was not cleaned up: {:?}",
+        temps
+    );
 
     let _ = std::fs::remove_dir_all(dir);
 }
