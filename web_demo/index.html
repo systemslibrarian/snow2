@@ -64,6 +64,7 @@
         Browser demo uses <b>websafe-zw</b> mode (zero-width embedding). Some platforms may strip zero-width characters.
         For strongest reliability, use the CLI with file-based carriers.
       </p>
+      <div id="wasmStatus" class="status"></div>
     </section>
 
     <section class="card">
@@ -74,7 +75,7 @@
       </label>
 
       <label>
-        Carrier text
+        Text to hide your message in (carrier)
         <textarea id="carrier" rows="10" placeholder="Paste any text here, or click 'Generate sample text' below..."></textarea>
       </label>
 
@@ -85,7 +86,7 @@
       </div>
 
       <label>
-        Output carrier (copy / download)
+        Output text with hidden message (copy / download)
         <textarea id="outCarrier" rows="10" readonly></textarea>
       </label>
 
@@ -98,10 +99,14 @@
 
     <section class="card">
       <h2>Extract</h2>
+      <p class="note">
+        To recover a hidden message: enter the <b>same password</b> (and pepper, if used) in
+        <b>Security Settings</b> above, paste the text below, and click <b>Extract</b>.
+      </p>
 
       <label>
-        Carrier to extract from
-        <textarea id="extractCarrier" rows="10" placeholder="Paste the output carrier here..."></textarea>
+        Text containing hidden message (carrier)
+        <textarea id="extractCarrier" rows="10" placeholder="Paste the text containing a hidden message here..."></textarea>
       </label>
 
       <div class="row">

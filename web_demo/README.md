@@ -36,8 +36,8 @@ Then open http://localhost:8000.
 
 1. `app.js` imports `embed_websafe_zw` and `extract_websafe_zw` from the WASM package
 2. The WASM module (`snow2_wasm`) wraps the snow2 Rust library with wasm-bindgen bindings
-3. Embedding creates a SNOW2 v1 container (Argon2id → HKDF-SHA256 domain-separated key derivation → XChaCha20-Poly1305 AEAD), converts it to a CRC-32-framed bitstream, and encodes it as zero-width Unicode characters inserted into the carrier text
-4. Extraction validates KDF bounds from the container header, then reverses the process: strips zero-width characters → bitstream → CRC-32 check → container bytes → AEAD decrypt
+3. Embedding creates a SNOW2 v1 container (Argon2id → HKDF-SHA256 domain-separated key derivation → XChaCha20-Poly1305 AEAD), converts it to a CRC-32-framed bitstream, and encodes **8 bits per carrier line** as zero-width Unicode characters (U+200B = 0, U+200C = 1) appended to each line
+4. Extraction validates KDF bounds from the container header, then reverses the process: strips zero-width characters from each line (up to 8 bits) → bitstream → CRC-32 check → container bytes → AEAD decrypt
 
 ## File Structure
 
@@ -54,6 +54,5 @@ web_demo/
 - Uses `websafe-zw` mode only (best for browser copy/paste)
 - Some platforms may strip zero-width characters
 - No PQC support in the browser demo (PQC is CLI-only)
-- KDF with high memory settings may be slow in WASM
+- KDF with high memory settings may be slow in WASM — the WASM build caps KDF at **128 MiB memory, 8 iterations, 4 parallelism** to prevent browser OOM
 - WASM cannot use mlock — sensitive memory is zeroized on drop but not locked against swapping
-- KDF parameters must stay within extraction bounds (8–512 MiB, 1–64 iters, 1–16 parallelism)

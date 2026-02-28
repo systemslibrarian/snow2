@@ -173,6 +173,7 @@ SNOW2 supports multiple embedding strategies.
 
 ### `websafe-zw` *(recommended)*
 - Zero-width Unicode character embedding (U+200B, U+200C)
+- **8 bits per line** — each carrier line can hold a full byte, dramatically reducing carrier size
 - Survives copy/paste, most editors, and many messaging apps
 - Better suited for browser/WASM usage
 - Some platforms may strip zero-width characters (Unicode normalization, clipboard sanitizers)
@@ -221,7 +222,7 @@ cargo build --release
 ```
 
 ### 2) Generate a carrier (recommended for demos)
-`classic-trailing` embeds **1 bit per non-empty line**, so you often need thousands of lines.
+`classic-trailing` embeds **1 bit per non-empty line**; `websafe-zw` embeds **8 bits per line** (a full byte), so it needs far fewer lines.
 
 A helper script is included:
 
@@ -478,7 +479,7 @@ SNOW2 preserves the spirit but is a complete rewrite:
 - **Encryption**: XChaCha20-Poly1305 AEAD (authenticated encryption, large nonce space)
 - **Key derivation**: Argon2id + HKDF-SHA256 (memory-hard, domain-separated)
 - **Integrity**: AEAD authentication + CRC-32 corruption detection
-- **Modes**: Classic trailing whitespace (tribute mode) + zero-width Unicode (web-friendly)
+- **Modes**: Classic trailing whitespace (tribute mode, 1 bit/line) + zero-width Unicode (web-friendly, 8 bits/line)
 - **Optional PQC**: Hybrid Kyber1024 + Dilithium5 post-quantum crypto
 - **Secure memory**: mlock'd buffers with guard pages, zeroize-on-drop
 

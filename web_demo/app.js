@@ -70,31 +70,51 @@ function getSecurityInputs() {
 }
 
 async function main() {
-  await init();
-
   const embedStatus = $("embedStatus");
   const extractStatus = $("extractStatus");
+  const wasmStatus = $("wasmStatus");
+
+  // Try to load the WASM module — show a clear error if it fails
+  let wasmReady = false;
+  try {
+    status(wasmStatus, "", "Loading encryption engine…");
+    await init();
+    wasmReady = true;
+    status(wasmStatus, "ok", "Ready — encryption engine loaded.");
+  } catch (e) {
+    status(wasmStatus, "err", "Failed to load encryption engine (WASM). " + String(e?.message || e));
+    console.error("WASM init failed:", e);
+  }
+
+  function requireWasm(statusEl) {
+    if (!wasmReady) {
+      status(statusEl, "err", "Encryption engine not loaded. Refresh the page or check console for errors.");
+      return false;
+    }
+    return true;
+  }
 
   // Shared state for recovered binary data — accessible to extract, download, clear
   let recoveredB64 = null;
 
   $("genCarrier").addEventListener("click", () => {
     $("carrier").value = generateCarrier(6000);
-    status(embedStatus, "ok", "Sample text generated (6,000 lines). Ready to embed.");
+    status(embedStatus, "ok", "Sample cover text generated (6,000 lines). Ready to embed.");
   });
 
   $("embedBtn").addEventListener("click", () => {
+    if (!requireWasm(embedStatus)) return;
     try {
-      status(embedStatus, "", "");
+      status(embedStatus, "", "Embedding…");
 
       const { password, pepper, pepperRequired, kdfMib, kdfIters, kdfPar } = getSecurityInputs();
       const message = $("message").value;
       const carrier = $("carrier").value;
 
-      if (!password) throw new Error("Password is required.");
-      if (!carrier.trim()) throw new Error("Carrier text is required.");
-      if (!message) throw new Error("Message is required.");
-      if (pepperRequired && !pepper) throw new Error("Pepper is required (policy enabled).");
+      if (!password) throw new Error("Password is required — enter one in Security Settings above.");
+      if (!carrier.trim()) throw new Error("Cover text is required — paste text or click 'Generate sample text'.");
+      if (!message) throw new Error("Message is required — type something in 'Message to hide'.");
+      if (pepperRequired && !pepper) throw new Error("Pepper is required (policy enabled) — enter one in Security Settings above.");
 
       const outCarrier = embed_websafe_zw(
         carrier,
@@ -110,7 +130,7 @@ async function main() {
       $("outCarrier").value = outCarrier;
       $("extractCarrier").value = outCarrier;
 
-      status(embedStatus, "ok", "Embedded successfully (websafe-zw).");
+      status(embedStatus, "ok", "Embedded successfully. Output is below — copy or download it.");
     } catch (e) {
       status(embedStatus, "err", String(e?.message || e));
     }
@@ -118,19 +138,23 @@ async function main() {
 
   $("downloadCarrier").addEventListener("click", () => {
     const text = $("outCarrier").value;
-    if (!text) return;
+    if (!text) {
+      status(embedStatus, "err", "Nothing to download — embed a message first.");
+      return;
+    }
     downloadText("snow2_carrier_out.txt", text);
   });
 
   $("extractBtn").addEventListener("click", () => {
+    if (!requireWasm(extractStatus)) return;
     try {
-      status(extractStatus, "", "");
+      status(extractStatus, "", "Extracting…");
 
       const { password, pepper } = getSecurityInputs();
       const carrier = $("extractCarrier").value;
 
-      if (!password) throw new Error("Password is required.");
-      if (!carrier.trim()) throw new Error("Carrier text is required.");
+      if (!password) throw new Error("Password is required — enter the same password used to embed (in Security Settings above).");
+      if (!carrier.trim()) throw new Error("Paste the text containing the hidden message above.");
 
       const res = extract_websafe_zw(carrier, password, pepper);
 
@@ -148,7 +172,7 @@ async function main() {
 
   $("downloadRecovered").addEventListener("click", () => {
     if (!recoveredB64) {
-      status(extractStatus, "err", "Nothing to download. Extract first.");
+      status(extractStatus, "err", "Nothing to download. Extract a message first.");
       return;
     }
     const binStr = atob(recoveredB64);
