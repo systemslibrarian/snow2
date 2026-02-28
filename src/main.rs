@@ -549,13 +549,14 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     //
     // Overhead includes:
     //   - Bitstream framing: 8 bytes (4 length + 4 CRC-32)
-    //   - Container structure: 10 bytes fixed (5 magic + 1 version + 4 header_len)
-    //   - Container header JSON: ~250–350 bytes typical (varies with KDF params)
+    //   - Container envelope: 10 bytes fixed (5 magic + 1 version + 4 header_len)
+    //   - Container header: 57 bytes (compact binary, v3) or ~290 bytes (JSON, v1)
     //   - AEAD tag: 16 bytes (Poly1305)
+    //   - Deflate compression: ~20–30% further reduction
     //
-    // We estimate conservatively with ~330 bytes container overhead.
+    // v3 compact container: ~85 raw bytes → ~75 after deflate + 8 framing ≈ 83
     let framing_overhead_bytes: usize = 8; // length (4) + CRC-32 (4)
-    let container_overhead_bytes: usize = 330; // magic+ver+hdrlen+header_json+tag (conservative)
+    let container_overhead_bytes: usize = 80; // v3 compact ~85 raw → ~75 after deflate
     let total_overhead_bytes = framing_overhead_bytes + container_overhead_bytes;
 
     // classic-trailing: 1 bit per line

@@ -23,6 +23,10 @@ pub mod pqc;
 use anyhow::{bail, Result};
 use secure_mem::SecureVec;
 
+use flate2::write::{DeflateEncoder, DeflateDecoder};
+use flate2::Compression;
+use std::io::Write;
+
 /// Supported embedding/extraction modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -47,6 +51,20 @@ impl Mode {
     }
 }
 
+/// Compress bytes with deflate.
+fn deflate_compress(data: &[u8]) -> Result<Vec<u8>> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(data)?;
+    Ok(encoder.finish()?)
+}
+
+/// Decompress deflate-compressed bytes (returns None if data is not valid deflate).
+fn deflate_decompress(data: &[u8]) -> Option<Vec<u8>> {
+    let mut decoder = DeflateDecoder::new(Vec::new());
+    decoder.write_all(data).ok()?;
+    decoder.finish().ok()
+}
+
 /// Embed payload bytes into a carrier text using the chosen mode.
 /// Returns the modified carrier text.
 ///
@@ -64,8 +82,10 @@ pub fn embed(
     // Step 1: containerize (encrypt+auth)
     let container = container::Snow2Container::seal(payload, password, pepper, mode)?;
 
-    // Step 2: bytes -> bits
-    let bits = stego::bytes_to_bits(&container.to_bytes()?)?;
+    // Step 2: compress container, then bytes -> bits
+    let raw = container.to_bytes()?;
+    let compressed = deflate_compress(&raw)?;
+    let bits = stego::bytes_to_bits(&compressed)?;
 
     // Step 3: embed bits
     match mode {
@@ -85,7 +105,9 @@ pub fn embed_with_options(
 ) -> Result<String> {
     let container =
         container::Snow2Container::seal_with_options(payload, password, pepper, mode, opts)?;
-    let bits = stego::bytes_to_bits(&container.to_bytes()?)?;
+    let raw = container.to_bytes()?;
+    let compressed = deflate_compress(&raw)?;
+    let bits = stego::bytes_to_bits(&compressed)?;
 
     match mode {
         Mode::ClassicTrailing => stego::classic_trailing::embed_bits(carrier_text, &bits),
@@ -114,9 +136,12 @@ pub fn extract(
     };
 
     // Step 2: bits -> bytes
-    let container_bytes = stego::bits_to_bytes(&bits)?;
+    let raw_bytes = stego::bits_to_bytes(&bits)?;
 
-    // Step 3: open container
+    // Step 3: try deflate decompress; fall back to raw (backward compat with pre-compression containers)
+    let container_bytes = deflate_decompress(&raw_bytes).unwrap_or(raw_bytes);
+
+    // Step 4: open container
     let container = container::Snow2Container::from_bytes(&container_bytes)?;
     container.open(password, pepper, pqc_sk)
 }
