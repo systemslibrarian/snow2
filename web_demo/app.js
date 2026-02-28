@@ -266,6 +266,7 @@ async function main() {
 
       // Store recovered data for later download
       recoveredB64 = res.as_base64;
+      $("downloadRecoveredBtn").disabled = !recoveredB64;
 
       status(extractStatus, "ok", `Decrypted successfully! (${res.bytes_len} bytes recovered)`);
     } catch (e) {
@@ -290,6 +291,7 @@ async function main() {
     $("kdfIters").value = 3;
     $("kdfPar").value = 1;
     recoveredB64 = null;
+    $("downloadRecoveredBtn").disabled = true;
     zwVisible = false;
     zwOriginalText = "";
     $("toggleZw").textContent = "Show hidden markers";
@@ -311,7 +313,15 @@ async function main() {
     $("password").value = "";
     $("pepper").value = "";
     recoveredB64 = null;
+    $("downloadRecoveredBtn").disabled = true;
     status(extractStatus, "ok", "Cleared.");
+  });
+
+  // --- Download recovered data ---
+  $("downloadRecoveredBtn").addEventListener("click", () => {
+    if (!recoveredB64) return;
+    const raw = Uint8Array.from(atob(recoveredB64), (c) => c.charCodeAt(0));
+    downloadBytes("snow2_recovered.bin", raw);
   });
 
   // --- Show / hide zero-width markers toggle ---
