@@ -547,24 +547,31 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     // classic-trailing: 1 bit per non-empty line
     // websafe-zw: 8 bits (1 byte) per non-empty line
     //
-    // Overhead includes:
-    //   - Bitstream framing: 8 bytes (4 length + 4 CRC-32)
-    //   - Container envelope: 10 bytes fixed (5 magic + 1 version + 4 header_len)
-    //   - Container header: 57 bytes (compact binary, v3) or ~290 bytes (JSON, v1)
-    //   - AEAD tag: 16 bytes (Poly1305)
-    //   - Deflate compression: ~20–30% further reduction
+    // V4 hardened overhead includes:
+    //   - Outer AEAD: 24 bytes nonce + 16 bytes tag = 40 bytes
+    //   - Constant-size padding: container inner_len rounded to next 64
+    //   - Container envelope: 1 byte (version)
+    //   - Container header: 49 bytes (v4 binary, packed KDF)
+    //   - Inner AEAD tag: 16 bytes (Poly1305)
+    //   - Length prefix: 4 bytes (inside padded blob)
+    //   - NO CRC framing (outer AEAD provides integrity)
     //
-    // v3 compact container: ~85 raw bytes → ~75 after deflate + 8 framing ≈ 83
-    let framing_overhead_bytes: usize = 8; // length (4) + CRC-32 (4)
-    let container_overhead_bytes: usize = 80; // v3 compact ~85 raw → ~75 after deflate
-    let total_overhead_bytes = framing_overhead_bytes + container_overhead_bytes;
+    // Minimum v4 overhead for 0-byte payload:
+    //   inner_len = 4 + (1 + 49 + 16) = 70 → bucket=128 → outer=128+40=168 bytes
+    //   So minimum ~168 bytes, max payload that fits:
+    //   carrier_capacity - 40 (outer) → bucket → bucket - 4 (len) - 1 - 49 - 16 (container)
+    let outer_overhead_bytes: usize = 40; // 24 nonce + 16 tag
+    let container_fixed_bytes: usize = 1 + 49 + 16; // version + header + AEAD tag
+    let len_prefix_bytes: usize = 4;
+    let min_inner = len_prefix_bytes + container_fixed_bytes; // 70
+    let total_overhead_bytes = outer_overhead_bytes + snow2::container::pad_bucket(min_inner);
 
     // classic-trailing: 1 bit per line
     let classic_raw_bits = non_empty_lines;
     let classic_total_overhead_bits = total_overhead_bytes * 8;
     let classic_usable_bits = classic_raw_bits.saturating_sub(classic_total_overhead_bits);
     let classic_usable_bytes = classic_usable_bits / 8;
-    let classic_raw_bytes = classic_raw_bits.saturating_sub(framing_overhead_bytes * 8) / 8;
+    let classic_raw_bytes = classic_raw_bits.saturating_sub(outer_overhead_bytes * 8) / 8;
 
     // websafe-zw: 8 bits per line
     let zw_bits_per_line: usize = 8;
@@ -572,7 +579,7 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     let zw_total_overhead_bits = total_overhead_bytes * 8;
     let zw_usable_bits = zw_raw_bits.saturating_sub(zw_total_overhead_bits);
     let zw_usable_bytes = zw_usable_bits / 8;
-    let zw_raw_bytes = zw_raw_bits.saturating_sub(framing_overhead_bytes * 8) / 8;
+    let zw_raw_bytes = zw_raw_bits.saturating_sub(outer_overhead_bytes * 8) / 8;
 
     // Detect line endings
     let crlf_count = carrier_bytes.windows(2).filter(|w| w == b"\r\n").count();

@@ -100,3 +100,77 @@ pub fn extract_bits(carrier_text: &str) -> Result<Vec<bool>> {
 
     Ok(bits)
 }
+
+/// Embed bits AND fill ALL remaining non-empty lines with random trailing whitespace.
+///
+/// Defeats detection based on which lines have trailing whitespace.
+pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Result<String> {
+    let lines: Vec<&str> = carrier_text.split('\n').collect();
+    let usable = lines.iter().filter(|l| !l.is_empty()).count();
+
+    if bits.len() > usable {
+        anyhow::bail!(
+            "Carrier too small for classic-trailing mode: need {} usable lines, have {}.",
+            bits.len(),
+            usable
+        );
+    }
+
+    let mut bit_idx = 0usize;
+    let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
+
+    for line in &lines {
+        if line.is_empty() {
+            out_lines.push(String::new());
+            continue;
+        }
+
+        let trimmed = line.trim_end_matches([' ', '\t']);
+
+        if bit_idx < bits.len() {
+            // Embed real data bit
+            let marker = if bits[bit_idx] { '\t' } else { ' ' };
+            out_lines.push(format!("{trimmed}{marker}"));
+            bit_idx += 1;
+        } else {
+            // Fill remaining lines with random trailing whitespace
+            let random_bytes = crate::crypto::random_bytes(1)
+                .unwrap_or_else(|_| vec![0u8]);
+            let marker = if (random_bytes[0] & 1) == 1 { '\t' } else { ' ' };
+            out_lines.push(format!("{trimmed}{marker}"));
+        }
+    }
+
+    Ok(out_lines.join("\n"))
+}
+
+/// Extract bits from ALL non-empty lines (does not stop at first
+/// unmarked line). Used by v4 pipeline where every line has whitespace.
+pub fn extract_all_bits(carrier_text: &str) -> Vec<bool> {
+    let mut bits = Vec::new();
+
+    for line in carrier_text.split('\n') {
+        if line.is_empty() {
+            continue;
+        }
+
+        let bytes = line.as_bytes();
+        if bytes.is_empty() {
+            continue;
+        }
+
+        let marker = bytes[bytes.len() - 1];
+        match marker {
+            b'\t' => bits.push(true),
+            b' ' => bits.push(false),
+            _ => bits.push(false), // unmodified line, push zero as filler
+        }
+    }
+
+    bits
+}
+
+/// Count the number of usable (non-empty) lines in the carrier.
+pub fn usable_lines(carrier_text: &str) -> usize {
+    carrier_text.split('\n').filter(|l| !l.is_empty()).count()
+}
