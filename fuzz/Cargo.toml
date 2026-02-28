@@ -1,0 +1,53 @@
+[package]
+name = "snow2-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.snow2]
+path = ".."
+
+# Prevent this from clashing with the main workspace
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_container_parse"
+path = "fuzz_targets/fuzz_container_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_bits_to_bytes"
+path = "fuzz_targets/fuzz_bits_to_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_classic_extract"
+path = "fuzz_targets/fuzz_classic_extract.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_websafe_extract"
+path = "fuzz_targets/fuzz_websafe_extract.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_extract_pipeline"
+path = "fuzz_targets/fuzz_extract_pipeline.rs"
+test = false
+doc = false
+bench = false

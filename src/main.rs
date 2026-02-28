@@ -534,7 +534,7 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
     let non_empty_lines = carrier_text.lines().filter(|l| !l.is_empty()).count();
     let bytes = carrier_bytes.len();
 
-    // Count zero-width characters
+    // Count zero-width characters (U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM)
     let zw_chars: usize = carrier_text.chars().filter(|c| matches!(*c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')).count();
 
     let trailing_ws_lines = carrier_text
@@ -542,13 +542,27 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
         .filter(|l| !l.is_empty() && (l.ends_with(' ') || l.ends_with('\t')))
         .count();
 
-    // Capacity estimates: each non-empty line carries 1 bit in both modes.
-    // We subtract 8 bytes (64 bits) for the bitstream framing header
-    // (4 bytes length + 4 bytes CRC-32).
+    // ── Capacity estimates ───────────────────────────────────────────
+    //
+    // Each non-empty line carries 1 bit. The overhead includes:
+    //   - Bitstream framing: 8 bytes (4 length + 4 CRC-32) = 64 bits
+    //   - Container structure: 10 bytes fixed (5 magic + 1 version + 4 header_len)
+    //   - Container header JSON: ~250–350 bytes typical (varies with KDF params)
+    //   - AEAD tag: 16 bytes (Poly1305)
+    //
+    // We estimate conservatively with ~300 bytes container overhead.
     let raw_bits = non_empty_lines;
-    let framing_overhead_bits: usize = 64; // length (32) + CRC-32 (32)
-    let usable_bits = raw_bits.saturating_sub(framing_overhead_bits);
+    let framing_overhead_bytes: usize = 8; // length (4) + CRC-32 (4)
+    let container_overhead_bytes: usize = 330; // magic+ver+hdrlen+header_json+tag (conservative)
+    let total_overhead_bytes = framing_overhead_bytes + container_overhead_bytes;
+    let total_overhead_bits = total_overhead_bytes * 8;
+
+    let usable_bits = raw_bits.saturating_sub(total_overhead_bits);
     let usable_bytes = usable_bits / 8;
+
+    // Also show raw capacity (before container overhead) for reference
+    let raw_usable_bits = raw_bits.saturating_sub(framing_overhead_bytes * 8);
+    let raw_usable_bytes = raw_usable_bits / 8;
 
     // Detect line endings
     let crlf_count = carrier_bytes.windows(2).filter(|w| w == b"\r\n").count();
@@ -567,52 +581,129 @@ fn cmd_scan(carrier_path: &str) -> Result<()> {
         .filter(|l| l.contains('\t'))
         .count();
 
+    // ── Structural analysis ──────────────────────────────────────────
+    // Check if carrier appears to already have structured embedded data.
+    // Count consecutive non-empty lines with trailing whitespace markers.
+    let consecutive_trailing = {
+        let mut max_run = 0usize;
+        let mut current_run = 0usize;
+        for line in carrier_text.lines() {
+            if !line.is_empty() && (line.ends_with(' ') || line.ends_with('\t')) {
+                current_run += 1;
+                max_run = max_run.max(current_run);
+            } else {
+                current_run = 0;
+            }
+        }
+        max_run
+    };
+
+    // Count consecutive lines with trailing zero-width chars
+    let consecutive_zw = {
+        let mut max_run = 0usize;
+        let mut current_run = 0usize;
+        for line in carrier_text.lines() {
+            if !line.is_empty() && line.ends_with(|c: char| c == '\u{200B}' || c == '\u{200C}') {
+                current_run += 1;
+                max_run = max_run.max(current_run);
+            } else {
+                current_run = 0;
+            }
+        }
+        max_run
+    };
+
+    // ── Output ───────────────────────────────────────────────────────
     println!("Scan results for: {carrier_path}");
-    println!("  Length:        {} bytes", bytes);
-    println!("  Lines:         {} (non-empty: {})", total_lines, non_empty_lines);
+    println!("  File size:     {} bytes", bytes);
+    println!("  Lines:         {} total, {} non-empty", total_lines, non_empty_lines);
     println!("  Line endings:  {}", line_ending);
-    println!("  Trailing WS:   {} lines", trailing_ws_lines);
-    println!("  Zero-width:    {} characters", zw_chars);
+    println!("  Trailing WS:   {} lines (longest run: {})", trailing_ws_lines, consecutive_trailing);
+    println!("  Zero-width:    {} chars (longest run: {} lines)", zw_chars, consecutive_zw);
     println!("  Lines w/ tabs: {}", lines_with_tabs);
     println!();
-    println!("  Stego capacity (1 bit/line, minus framing):");
-    println!("    Available:   {} bits = {} bytes", usable_bits, usable_bytes);
+    println!("  Capacity (1 bit/non-empty line):");
+    println!("    Raw bits:    {} ({} bytes, before container overhead)", raw_bits, raw_usable_bytes);
+    println!("    Payload max: ~{} bytes (after ~{} bytes container+framing overhead)",
+             usable_bytes, total_overhead_bytes);
 
-    if usable_bytes < 64 {
-        println!("    WARNING: Very low capacity. Carrier may be too small for most payloads.");
+    if usable_bytes == 0 {
+        println!("    NOTE: Carrier is too small for any payload with default settings.");
+    } else if usable_bytes < 64 {
+        println!("    NOTE: Very low capacity. Only tiny payloads will fit.");
     }
+    println!();
 
-    // Diagnostics / warnings
+    // ── Fragility assessment per mode ────────────────────────────────
+    println!("  Fragility notes:");
+    println!("    classic-trailing: {} trailing WS → {}",
+             if trailing_ws_lines > 0 { "PRESENT" } else { "none" },
+             if trailing_ws_lines > 0 {
+                 "may already contain data, or editors may strip on save"
+             } else {
+                 "clean carrier for this mode"
+             });
+    println!("    websafe-zw:       {} zero-width → {}",
+             if zw_chars > 0 { "PRESENT" } else { "none" },
+             if zw_chars > 0 {
+                 "may already contain data; some tools strip these chars"
+             } else {
+                 "clean carrier for this mode"
+             });
+
+    // ── Warnings ─────────────────────────────────────────────────────
     let mut warnings = Vec::new();
 
     if crlf_count > 0 {
         warnings.push(
-            "CRLF line endings detected. Some editors/platforms may convert these to LF, \
-             destroying embedded data. Consider normalizing to LF before embedding."
+            "CRLF line endings detected. Many editors and tools (git, diff, \
+             email) may convert to LF, destroying embedded data. Consider \
+             normalizing to LF before embedding."
+                .to_string(),
+        );
+    }
+
+    if line_ending == "Mixed CRLF/LF" {
+        warnings.push(
+            "Mixed line endings (CRLF + LF). This is unusual and may indicate \
+             the file has been partially converted. Line ending normalization \
+             could corrupt embedded data."
                 .to_string(),
         );
     }
 
     if lines_with_tabs > 0 {
         warnings.push(format!(
-            "{} lines contain tab characters. Some editors auto-expand tabs to spaces, \
-             which would corrupt classic-trailing stego data.",
+            "{} lines contain tab characters. Editors that auto-expand tabs \
+             to spaces will corrupt classic-trailing markers (tab = bit 1).",
             lines_with_tabs
         ));
     }
 
-    if trailing_ws_lines > 0 {
+    if trailing_ws_lines > 0 && consecutive_trailing > 20 {
         warnings.push(format!(
-            "{} lines already have trailing whitespace. This carrier may already contain \
-             classic-trailing encoded data, or editors may strip trailing whitespace on save.",
+            "{} consecutive lines with trailing whitespace detected. This \
+             pattern is consistent with classic-trailing embedded data.",
+            consecutive_trailing
+        ));
+    } else if trailing_ws_lines > 0 {
+        warnings.push(format!(
+            "{} lines have trailing whitespace. Editors with 'trim trailing \
+             whitespace on save' will destroy classic-trailing data.",
             trailing_ws_lines
         ));
     }
 
-    if zw_chars > 0 {
+    if zw_chars > 0 && consecutive_zw > 20 {
         warnings.push(format!(
-            "{} zero-width characters found. This carrier may already contain \
-             websafe-zw encoded data.",
+            "{} consecutive lines with trailing zero-width chars detected. \
+             This pattern is consistent with websafe-zw embedded data.",
+            consecutive_zw
+        ));
+    } else if zw_chars > 0 {
+        warnings.push(format!(
+            "{} zero-width characters found. Unicode normalization (NFC/NFD/NFKC/NFKD) \
+             or some messaging platforms may strip these.",
             zw_chars
         ));
     }
