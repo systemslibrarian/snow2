@@ -1,6 +1,8 @@
 # SNOW2 ❄️  
 *A modern Rust tribute to Matthew Kwan's SNOW steganography tool.*
 
+**[Try the live demo →](https://systemslibrarian.github.io/snow2/)**
+
 SNOW2 is a clean, modern reimplementation inspired by the original **SNOW** program by **Matthew Kwan** — a classic late-1990s tool that demonstrated how encrypted messages could be hidden inside ordinary-looking text using whitespace.
 
 This project preserves the elegance and educational value of the original while upgrading the cryptography, safety, and engineering for today.
@@ -161,38 +163,52 @@ snow2 extract \
 
 SNOW2 supports multiple embedding strategies.
 
+> **Recommendation:** For reliable day-to-day use, prefer **`websafe-zw`** mode or work with **file-based carriers** that won't be processed by editors, mail clients, or CI tools. Reserve `classic-trailing` for educational purposes, controlled environments, or when faithfulness to the original SNOW is desired.
+
 ### `classic-trailing`
 - Trailing spaces and tabs encode bits at the end of each line
 - Direct homage to original SNOW
 - Most elegant
-- Most fragile (subject to whitespace trimming by editors/tools)
+- **Most fragile** — trailing whitespace is silently stripped by most text editors, Git hooks, linters, formatters, email systems, and CI pipelines. If the carrier passes through *any* of these, the payload is destroyed.
 
-### `websafe-zw`
+### `websafe-zw` *(recommended)*
 - Zero-width Unicode character embedding (U+200B, U+200C)
-- More copy/paste tolerant
+- Survives copy/paste, most editors, and many messaging apps
 - Better suited for browser/WASM usage
-- Some platforms may strip zero-width characters
+- Some platforms may strip zero-width characters (Unicode normalization, clipboard sanitizers)
 
 ---
 
 ## Important Limitations
 
-Whitespace steganography can be fragile.
+Whitespace steganography is inherently fragile. **Strong encryption does not mean perfect steganographic undetectability.**
 
-Many tools may:
-- Trim trailing spaces
-- Normalize whitespace
-- Rewrap lines
-- Strip zero-width characters
+### Trailing whitespace (`classic-trailing` mode)
+- Most text editors have "trim trailing whitespace on save" enabled **by default** — VS Code, JetBrains, Vim, and others will silently destroy the payload on save
+- Git can be configured to strip trailing whitespace (`core.whitespace`)
+- Linters, formatters, CI tools, and email systems routinely normalize whitespace
+- This is the most fragile mode, but also the most faithful to the original SNOW
+- **For reliability, use `websafe-zw` mode or exchange carriers as untouched files**
 
-If the carrier changes, extraction will fail — intentionally. SNOW2 treats integrity as mandatory.
+### Zero-width characters (`websafe-zw` mode)
+- More tolerant of copy/paste than trailing whitespace
+- Survives in many browsers, rich-text editors, and messaging apps
+- Can still be stripped by: Unicode normalization (NFKC/NFKD), some messaging platforms, clipboard sanitizers, or HTML rendering
+- Not "bulletproof" — just "more resilient"
+
+### General
+- If the carrier changes in any way, extraction will fail — this is by design (integrity is mandatory via AEAD)
+- File modification metadata (timestamps, sizes) may reveal that a file has been altered
+- A forensic analyst comparing the original carrier to the modified carrier can detect embedding
 
 Use the `scan` command to check a carrier before embedding. It reports:
-- Stego capacity (bits/bytes available)
-- Line ending format (LF vs CRLF)
+- Stego capacity (raw bits and estimated payload max after container overhead)
+- Line ending format (LF vs CRLF vs mixed)
 - Tab character warnings (editor auto-expansion risk)
 - Existing trailing whitespace or zero-width characters
+- Consecutive marker run detection (signs of existing embedded data)
 - CRLF normalization risk warnings
+- Per-mode fragility notes
 
 ---
 
@@ -217,17 +233,19 @@ chmod +x scripts/make_carrier.sh
 ### 3) Embed a message
 ```bash
 snow2 embed \
-  --mode classic-trailing \
+  --mode websafe-zw \
   --carrier carrier.txt \
   --out out.txt \
   --message "hello snow2" \
   --password "pw"
 ```
 
+> **Tip:** `websafe-zw` is recommended for most use cases — it survives copy/paste and editor saves far better than `classic-trailing`. Use `classic-trailing` when you want exact fidelity to the original SNOW behaviour.
+
 ### 4) Extract
 ```bash
 snow2 extract \
-  --mode classic-trailing \
+  --mode websafe-zw \
   --carrier out.txt \
   --out recovered.bin \
   --password "pw"
@@ -370,6 +388,21 @@ Version byte is authenticated as AEAD AAD alongside the magic, preventing downgr
 - **Traffic analysis**: SNOW2 does not hide the fact that a file has been modified (file size changes, metadata, etc.)
 - **Guaranteed secure deletion**: File shredding is best-effort. SSDs, CoW filesystems, and journals may retain data.
 - **WASM security boundaries**: The browser demo uses zeroize-on-drop but cannot mlock memory
+- **Steganographic undetectability**: Strong crypto does not mean perfect steganographic undetectability. A motivated analyst examining trailing whitespace patterns or file diffs could detect that data has been embedded. SNOW2 hides data from casual observation, not from forensic analysis.
+
+### Important security caveats
+
+- **Trailing whitespace is fragile.** Most text editors (VS Code, vim, Sublime, etc.) have settings to strip trailing whitespace on save. Git hooks, linters, and formatting tools often do the same. If the carrier passes through any of these, embedded data is destroyed. This is inherent to whitespace steganography, not a SNOW2 bug.
+
+- **Zero-width Unicode is more resilient, but not bulletproof.** Zero-width characters (U+200B, U+200C) survive copy/paste in many contexts (browsers, rich-text editors, some messaging apps). However, Unicode normalization (NFC/NFD/NFKC/NFKD), some messaging platforms (Slack, Discord), and clipboard sanitizers may strip them.
+
+- **CRC-32 is not a cryptographic integrity check.** The CRC-32 in the bitstream framing catches accidental corruption (whitespace stripping, copy-paste mangling) early, before the container parser or AEAD sees it. It is not a security boundary — AEAD provides the actual cryptographic integrity guarantee.
+
+- **Shred/wipe is best-effort only.** On SSDs with wear-leveling, CoW filesystems (btrfs, ZFS), or journaling filesystems, overwritten data may persist. For high-assurance deletion, use full-disk encryption and destroy the key.
+
+- **PQC is optional and experimental.** Post-quantum crypto (Kyber1024 + Dilithium5) is available as an optional feature for users who want it. It is not the default identity of the tool. PQC containers are significantly larger (~10 KB overhead) and use different trust assumptions (keypair-based, not password-based).
+
+- **The browser/WASM demo is not the main security boundary.** It is a convenience UI for demonstration. In WASM, `mlock` is unavailable, and JavaScript's garbage collection may leave copies of sensitive data in memory.
 
 ---
 
@@ -432,6 +465,32 @@ Then open http://localhost:8000.
 
 ---
 
+## What has changed vs. original SNOW
+
+The original SNOW (by Matthew Kwan, late 1990s) was a C program that:
+- Used ICE encryption (a block cipher by the same author)
+- Encoded data in trailing whitespace (tabs and spaces)
+- Ran on Unix and Windows
+- Was simple, elegant, and educational
+
+SNOW2 preserves the spirit but is a complete rewrite:
+- **Language**: Rust (memory-safe, no buffer overflows)
+- **Encryption**: XChaCha20-Poly1305 AEAD (authenticated encryption, large nonce space)
+- **Key derivation**: Argon2id + HKDF-SHA256 (memory-hard, domain-separated)
+- **Integrity**: AEAD authentication + CRC-32 corruption detection
+- **Modes**: Classic trailing whitespace (tribute mode) + zero-width Unicode (web-friendly)
+- **Optional PQC**: Hybrid Kyber1024 + Dilithium5 post-quantum crypto
+- **Secure memory**: mlock'd buffers with guard pages, zeroize-on-drop
+
+What remains the same:
+- Text-steganography identity ("hide in plain sight")
+- Simplicity and educational clarity
+- Whitespace as the invisible channel
+- Single-binary CLI tool
+- The charm of hiding messages where nobody looks
+
+---
+
 ## Project Structure
 
 ```
@@ -456,6 +515,10 @@ tests/
   pepper_policy.rs    Pepper policy, KDF bounds, embed-side validation,
                       malformed container rejection tests
   pqc_roundtrip.rs    PQC keygen + embed/extract roundtrip test
+  negative_edge_cases.rs  Malformed input, corruption, boundary tests
+  cross_platform.rs   CRLF/LF, Unicode, platform survivability tests
+fuzz/
+  fuzz_targets/       Fuzz targets for container parse, bitstream, stego extract
 scripts/
   make_carrier.sh     Helper to generate carrier files
 ```
