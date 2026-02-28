@@ -304,3 +304,180 @@ fn from_bytes_rejects_oversized_header() {
         "expected header size rejection, got: {msg}"
     );
 }
+
+// ── KDF boundary-value tests ─────────────────────────────────────────
+
+#[test]
+fn kdf_bounds_accepts_max_m_cost() {
+    // Exactly at the 512 MiB cap — should pass
+    let params = KdfParams {
+        m_cost_kib: 512 * 1024,
+        t_cost: 3,
+        p_cost: 1,
+        out_len: 32,
+    };
+    params.validate_extraction_bounds()
+        .expect("exactly-at-max m_cost should pass");
+}
+
+#[test]
+fn kdf_bounds_rejects_just_above_max_m_cost() {
+    // 1 KiB above 512 MiB cap — should be rejected
+    let params = KdfParams {
+        m_cost_kib: 512 * 1024 + 1,
+        t_cost: 3,
+        p_cost: 1,
+        out_len: 32,
+    };
+    let err = params.validate_extraction_bounds().unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("memory cost too high"),
+        "expected just-above-max rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn kdf_bounds_accepts_min_m_cost() {
+    // Exactly at the 8 MiB floor — should pass
+    let params = KdfParams {
+        m_cost_kib: 8 * 1024,
+        t_cost: 1,
+        p_cost: 1,
+        out_len: 32,
+    };
+    params.validate_extraction_bounds()
+        .expect("exactly-at-min m_cost should pass");
+}
+
+#[test]
+fn kdf_bounds_rejects_just_below_min_m_cost() {
+    // 1 KiB below 8 MiB floor — should be rejected
+    let params = KdfParams {
+        m_cost_kib: 8 * 1024 - 1,
+        t_cost: 1,
+        p_cost: 1,
+        out_len: 32,
+    };
+    let err = params.validate_extraction_bounds().unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("memory cost too low"),
+        "expected just-below-min rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn kdf_bounds_accepts_max_t_cost() {
+    let params = KdfParams {
+        m_cost_kib: 64 * 1024,
+        t_cost: 64,
+        p_cost: 1,
+        out_len: 32,
+    };
+    params.validate_extraction_bounds()
+        .expect("exactly-at-max t_cost should pass");
+}
+
+#[test]
+fn kdf_bounds_rejects_just_above_max_t_cost() {
+    let params = KdfParams {
+        m_cost_kib: 64 * 1024,
+        t_cost: 65,
+        p_cost: 1,
+        out_len: 32,
+    };
+    let err = params.validate_extraction_bounds().unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("time cost too high"),
+        "expected t_cost rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn kdf_bounds_accepts_max_p_cost() {
+    let params = KdfParams {
+        m_cost_kib: 64 * 1024,
+        t_cost: 3,
+        p_cost: 16,
+        out_len: 32,
+    };
+    params.validate_extraction_bounds()
+        .expect("exactly-at-max p_cost should pass");
+}
+
+#[test]
+fn kdf_bounds_rejects_just_above_max_p_cost() {
+    let params = KdfParams {
+        m_cost_kib: 64 * 1024,
+        t_cost: 3,
+        p_cost: 17,
+        out_len: 32,
+    };
+    let err = params.validate_extraction_bounds().unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("parallelism too high"),
+        "expected p_cost rejection, got: {msg}"
+    );
+}
+
+// ── secure_fs tests ──────────────────────────────────────────────────
+
+#[test]
+fn write_secure_creates_file_atomically() {
+    let dir = "target/test_write_secure_atomic";
+    std::fs::create_dir_all(dir).unwrap();
+    let path = format!("{}/test_output.txt", dir);
+
+    snow2::secure_fs::write_secure(&path, b"atomic write test", false).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "atomic write test");
+
+    // Verify no leftover temp files
+    let temps: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+        .collect();
+    assert!(temps.is_empty(), "temp file was not cleaned up: {:?}", temps);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn write_secure_sensitive_sets_permissions() {
+    let dir = "target/test_write_secure_perms";
+    std::fs::create_dir_all(dir).unwrap();
+    let path = format!("{}/test_sensitive.txt", dir);
+
+    snow2::secure_fs::write_secure(&path, b"sensitive data", true).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "sensitive data");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::metadata(&path).unwrap().permissions();
+        assert_eq!(
+            perms.mode() & 0o777,
+            0o600,
+            "sensitive file should be mode 0o600"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn write_secure_temp_names_are_unique() {
+    // Write the same path twice — both should succeed (no collision on temp name)
+    let dir = "target/test_write_secure_unique";
+    std::fs::create_dir_all(dir).unwrap();
+    let path = format!("{}/test_unique.txt", dir);
+
+    snow2::secure_fs::write_secure(&path, b"first", false).unwrap();
+    snow2::secure_fs::write_secure(&path, b"second", false).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
+
+    let _ = std::fs::remove_dir_all(dir);
+}

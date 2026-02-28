@@ -56,4 +56,4 @@ web_demo/
 - No PQC support in the browser demo (PQC is CLI-only)
 - KDF with high memory settings may be slow in WASM
 - WASM cannot use mlock — sensitive memory is zeroized on drop but not locked against swapping
-- KDF parameters must stay within extraction bounds (8–4096 MiB, 1–64 iters, 1–16 parallelism)
+- KDF parameters must stay within extraction bounds (8–512 MiB, 1–64 iters, 1–16 parallelism)

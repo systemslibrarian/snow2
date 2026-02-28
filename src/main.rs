@@ -391,7 +391,7 @@ fn cmd_embed(
     )
     .context("embed failed")?;
 
-    std::fs::write(out_path, out_text.as_bytes())
+    snow2::secure_fs::write_secure(out_path, out_text.as_bytes(), false)
         .with_context(|| format!("write output carrier: {out_path}"))?;
 
     println!("OK: embedded {} bytes using mode {}", payload.len(), mode.as_str());
@@ -440,27 +440,27 @@ fn cmd_extract(
                     "PQC secret key is encrypted; provide --pqc-sk-password to decrypt it."
                 ))?;
             let sk = snow2::pqc::PqSecretKey::decrypt(&sk_bytes, sk_pw)?;
-            Some(sk.to_bytes())
+            Some(sk.to_zeroizing_bytes())
         } else {
-            Some(sk_bytes)
+            Some(zeroize::Zeroizing::new(sk_bytes))
         }
     } else {
         None
     };
 
     #[cfg(not(feature = "pqc"))]
-    let pqc_sk: Option<&[u8]> = None;
+    let pqc_sk: Option<zeroize::Zeroizing<Vec<u8>>> = None;
 
     let payload = snow2::extract(
         mode,
         &carrier_text,
         password.as_bytes(),
         pepper,
-        pqc_sk.as_deref(),
+        pqc_sk.as_deref().map(|v| v.as_slice()),
     )
     .context("extract failed")?;
 
-    std::fs::write(out_path, &payload[..])
+    snow2::secure_fs::write_secure(out_path, &payload[..], true)
         .with_context(|| format!("write extracted payload: {out_path}"))?;
 
     println!("OK: extracted {} bytes using mode {}", payload.len(), mode.as_str());
@@ -479,7 +479,7 @@ fn cmd_pqc_keygen(pk_path: &str, sk_path: &str, sk_password: Option<&str>) -> Re
         .with_context(|| format!("write public key to {}", pk_path))?;
 
     // Handle secret key encryption
-    let sk_bytes = if let Some(password) = sk_password {
+    let mut sk_bytes = if let Some(password) = sk_password {
         let encrypted = sk.encrypt(password.as_bytes())
             .context("encrypt secret key")?;
         println!("Secret key encrypted with provided password.");
@@ -495,6 +495,10 @@ fn cmd_pqc_keygen(pk_path: &str, sk_path: &str, sk_password: Option<&str>) -> Re
     // Write secret key with hardened permissions (0o600 on Unix)
     snow2::secure_fs::write_secure(sk_path, &sk_bytes, true)
         .with_context(|| format!("write secret key to {}", sk_path))?;
+
+    // Zeroize the secret key bytes now that they've been written to disk.
+    use zeroize::Zeroize;
+    sk_bytes.zeroize();
 
     println!("Wrote PQC keypair:");
     println!("  Public key: {} ({} bytes)", pk_path, pk_bytes.len());

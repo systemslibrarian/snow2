@@ -118,11 +118,20 @@ impl PqSecretKey {
         })
     }
 
+    /// Serialize the secret key to bytes.
+    ///
+    /// **WARNING**: The caller is responsible for zeroizing the returned Vec
+    /// when done. Prefer `to_zeroizing_bytes()` to get auto-zeroizing output.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(PQC_SECRET_KEY_SIZE);
         bytes.extend_from_slice(self.kyber_sk.as_bytes());
         bytes.extend_from_slice(self.dilithium_sk.as_bytes());
         bytes
+    }
+
+    /// Serialize the secret key to a zeroize-on-drop buffer.
+    pub fn to_zeroizing_bytes(&self) -> zeroize::Zeroizing<Vec<u8>> {
+        zeroize::Zeroizing::new(self.to_bytes())
     }
 
     /// Encrypt the secret key with a password for secure on-disk storage.
@@ -131,18 +140,22 @@ impl PqSecretKey {
     ///
     /// Output format (v1): `[SNOW2EK\0 (8)][version=1 (1)][salt (16)][nonce (24)][ciphertext+tag]`
     pub fn encrypt(&self, password: &[u8]) -> Result<Vec<u8>> {
+        use zeroize::Zeroize;
+
         let salt = crate::crypto::random_bytes(16)?;
         let kdf = crate::crypto::KdfParams::recommended();
         let key = crate::crypto::derive_key(password, None, &salt, &kdf)?;
 
         let nonce = crate::crypto::random_bytes(24)?;
-        let plaintext = self.to_bytes();
+        let mut plaintext = self.to_bytes();
         // AAD includes magic + version so downgrade attacks are detected.
         let mut aad = Vec::with_capacity(9);
         aad.extend_from_slice(ENCRYPTED_SK_MAGIC);
         aad.push(ENCRYPTED_SK_VERSION);
         let ciphertext =
             crate::crypto::aead_seal(&key, &nonce, &aad, &plaintext)?;
+        // Zeroize the plaintext secret key bytes immediately after encryption.
+        plaintext.zeroize();
 
         let mut out = Vec::with_capacity(8 + 1 + 16 + 24 + ciphertext.len());
         out.extend_from_slice(ENCRYPTED_SK_MAGIC);

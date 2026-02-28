@@ -123,8 +123,17 @@ async function main() {
       $("recoveredText").value = res.as_utf8 || "";
       $("recoveredB64").value = res.as_base64 || "";
 
-      // Keep bytes in memory for download
-      window.__snow2_recovered_b64 = res.as_base64;
+      // Store recovered data in a closure-scoped variable, not on window
+      let _recovered_b64 = res.as_base64;
+
+      // Update download handler to use closure-scoped data
+      $("downloadRecovered").onclick = () => {
+        if (!_recovered_b64) return;
+        const binStr = atob(_recovered_b64);
+        const bytes = new Uint8Array(binStr.length);
+        for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+        downloadBytes("recovered.bin", bytes);
+      };
 
       status(extractStatus, "ok", `Extracted ${res.bytes_len} bytes.`);
     } catch (e) {
@@ -133,14 +142,21 @@ async function main() {
   });
 
   $("downloadRecovered").addEventListener("click", () => {
-    const b64 = window.__snow2_recovered_b64;
-    if (!b64) return;
+    // Default handler — overridden after each extraction
+    status(extractStatus, "err", "Nothing to download. Extract first.");
+  });
 
-    const binStr = atob(b64);
-    const bytes = new Uint8Array(binStr.length);
-    for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-
-    downloadBytes("recovered.bin", bytes);
+  $("clearBtn").addEventListener("click", () => {
+    $("password").value = "";
+    $("pepper").value = "";
+    $("message").value = "";
+    $("outCarrier").value = "";
+    $("extractCarrier").value = "";
+    $("recoveredText").value = "";
+    $("recoveredB64").value = "";
+    $("pepperRequired").checked = false;
+    status(embedStatus, "", "");
+    status(extractStatus, "ok", "Sensitive fields cleared.");
   });
 
   // Pre-fill a carrier to make first use easy

@@ -63,8 +63,8 @@ SNOW2 upgrades the crypto model completely.
 
 ### Extraction-Side KDF Bounds
 - Untrusted container headers are validated **before** any expensive KDF work
-- Hard limits prevent denial-of-service via absurd memory/time cost values
-- Bounds: max 4 GiB memory, max 64 iterations, max 16 parallelism, min 8 MiB memory
+- Hard limits reject absurd memory/time cost values from hostile containers
+- Bounds: max 512 MiB memory, max 64 iterations, max 16 parallelism, min 8 MiB memory
 - Both embedding and extraction validate KDF params — you can't create un-extractable containers
 
 ### Hardened Profile
@@ -300,7 +300,7 @@ Defaults are reasonable for interactive use, but you can harden:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--kdf-mib` | 64 | Memory cost in MiB (min 8, max 4096) |
+| `--kdf-mib` | 64 | Memory cost in MiB (min 8, max 512) |
 | `--kdf-iters` | 3 | Iterations / time cost (min 1, max 64) |
 | `--kdf-par` | 1 | Parallelism (min 1, max 16) |
 
@@ -360,7 +360,7 @@ Version byte is authenticated as AEAD AAD alongside the magic, preventing downgr
 - **Wrong password/pepper**: AEAD authentication fails — no partial decryption
 - **Carrier tampering**: CRC-32 catches stego corruption before AEAD; AEAD catches everything else
 - **Header tampering**: Header JSON is AEAD AAD — any modification causes auth failure
-- **KDF DoS**: Extraction-side bounds reject absurd KDF parameters from hostile containers
+- **KDF bounds**: Extraction-side bounds reject absurd KDF parameters from hostile containers
 - **Weak KDF at embed time**: Embedding validates KDF params against the same bounds
 - **Key file exposure**: PQC secret keys can be encrypted at rest with password-derived AEAD
 - **File permission leaks**: Sensitive files written with restricted permissions via atomic rename

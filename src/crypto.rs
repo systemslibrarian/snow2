@@ -24,8 +24,12 @@ pub type ZeroizingKey = Zeroizing<[u8; 32]>;
 // interactive use-case) so that legitimate containers are never rejected.
 // They exist purely to prevent abuse.
 
-/// Maximum Argon2 memory cost accepted during extraction: 4 GiB.
-pub const KDF_MAX_M_COST_KIB: u32 = 4 * 1024 * 1024; // 4 GiB in KiB
+/// Maximum Argon2 memory cost accepted during extraction: 512 MiB.
+///
+/// This is generous enough for any reasonable interactive use-case
+/// while preventing practical DoS from hostile containers requesting
+/// multi-GiB allocations.
+pub const KDF_MAX_M_COST_KIB: u32 = 512 * 1024; // 512 MiB in KiB
 
 /// Maximum Argon2 time cost accepted during extraction: 64 iterations.
 pub const KDF_MAX_T_COST: u32 = 64;
@@ -101,11 +105,11 @@ impl KdfParams {
         }
         if self.m_cost_kib > KDF_MAX_M_COST_KIB {
             bail!(
-                "KDF memory cost too high: {} KiB (max {} KiB / {} GiB). \
+                "KDF memory cost too high: {} KiB (max {} KiB / {} MiB). \
                  This container may be malicious.",
                 self.m_cost_kib,
                 KDF_MAX_M_COST_KIB,
-                KDF_MAX_M_COST_KIB / (1024 * 1024)
+                KDF_MAX_M_COST_KIB / 1024
             );
         }
         if self.m_cost_kib < KDF_MIN_M_COST_KIB {
