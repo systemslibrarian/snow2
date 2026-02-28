@@ -133,6 +133,13 @@ button:hover { border-color: var(--accent); }
 .status.ok { color: var(--ok); }
 .status.err { color: var(--danger); }
 
+button.flash-ok {
+  background: var(--ok);
+  color: #000;
+  border-color: var(--ok);
+  transition: background 0.15s, color 0.15s;
+}
+
 .dedication {
   margin-top: 10px;
   color: var(--muted);

@@ -33,6 +33,16 @@ function downloadBytes(filename, bytes) {
   URL.revokeObjectURL(url);
 }
 
+function flash(btn, msg) {
+  const orig = btn.textContent;
+  btn.textContent = msg;
+  btn.classList.add("flash-ok");
+  setTimeout(() => {
+    btn.textContent = orig;
+    btn.classList.remove("flash-ok");
+  }, 1200);
+}
+
 function generateCarrier(lines = 6000) {
   const phrases = [
     "the quick brown fox jumps over the lazy dog",
@@ -130,7 +140,11 @@ async function main() {
       $("outCarrier").value = outCarrier;
       $("extractCarrier").value = outCarrier;
 
-      status(embedStatus, "ok", "Embedded successfully. Output is below — copy or download it.");
+      // Auto-select output so the user can immediately Ctrl+C
+      $("outCarrier").focus();
+      $("outCarrier").select();
+
+      status(embedStatus, "ok", "Embedded successfully. Text is selected — copy it (Ctrl+C) or use the buttons below.");
     } catch (e) {
       status(embedStatus, "err", String(e?.message || e));
     }
@@ -143,6 +157,24 @@ async function main() {
       return;
     }
     downloadText("snow2_carrier_out.txt", text);
+  });
+
+  $("copyCarrier").addEventListener("click", async () => {
+    const text = $("outCarrier").value;
+    if (!text) {
+      status(embedStatus, "err", "Nothing to copy — embed a message first.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      flash($("copyCarrier"), "Copied!");
+      status(embedStatus, "ok", "Copied to clipboard.");
+    } catch (e) {
+      // Fallback: select the text so user can Ctrl+C
+      $("outCarrier").focus();
+      $("outCarrier").select();
+      status(embedStatus, "ok", "Text selected — press Ctrl+C to copy.");
+    }
   });
 
   $("extractBtn").addEventListener("click", () => {
@@ -179,6 +211,23 @@ async function main() {
     const bytes = new Uint8Array(binStr.length);
     for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
     downloadBytes("recovered.bin", bytes);
+  });
+
+  $("copyRecovered").addEventListener("click", async () => {
+    const text = $("recoveredText").value;
+    if (!text) {
+      status(extractStatus, "err", "Nothing to copy. Extract a message first.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      flash($("copyRecovered"), "Copied!");
+      status(extractStatus, "ok", "Copied to clipboard.");
+    } catch (e) {
+      $("recoveredText").focus();
+      $("recoveredText").select();
+      status(extractStatus, "ok", "Text selected — press Ctrl+C to copy.");
+    }
   });
 
   function clearAll() {
