@@ -168,7 +168,9 @@ fn carrier_with_emoji_content() {
 
 #[test]
 fn websafe_markers_survive_if_preserved() {
-    // Verify that zero-width markers are correctly placed and read back
+    // Verify that zero-width markers are correctly placed and read back.
+    // embed_bits always emits exactly BITS_PER_LINE (8) ZW chars per line,
+    // zero-padding any partial last line to maintain byte alignment.
     let carrier = (0..100)
         .map(|i| format!("Line {i}"))
         .collect::<Vec<_>>()
@@ -181,7 +183,9 @@ fn websafe_markers_survive_if_preserved() {
     let bits_out =
         snow2::stego::websafe_zw::extract_bits(&embedded).expect("extract_bits should succeed");
 
-    assert_eq!(bits_out, bits_in);
+    // The 5 data bits are zero-padded to a full 8-bit line.
+    let expected = vec![true, false, true, true, false, false, false, false];
+    assert_eq!(bits_out, expected);
 }
 
 #[test]
