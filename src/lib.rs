@@ -287,7 +287,7 @@ fn try_v4_extract(
         crypto::KdfParams::hardened(),
     ];
 
-    for (pi, outer_params) in profiles.iter().enumerate() {
+    for outer_params in &profiles {
         // Derive master secret (expensive Argon2 — once per profile).
         let master = match crypto::derive_master_secret(password, salt, outer_params) {
             Ok(m) => m,
@@ -328,20 +328,24 @@ fn try_v4_extract(
                 // Parse v4 container
                 let container = container::Snow2Container::from_bytes_v4(container_bytes)?;
 
-                // The inner AEAD key is derived from the container's own KDF
-                // params (which may differ from the outer layer's profile).
-                // `open()` handles this derivation internally.
-                let plaintext = container.open(password, pepper, _pqc_sk)?;
+                // Reuse the master secret when the inner KDF params match
+                // the outer profile, avoiding a redundant Argon2 run.
+                let inner_kdf = container.kdf_params();
+                let plaintext = if inner_kdf == *outer_params {
+                    // Same KDF params + same salt → identical master secret.
+                    let inner_key = crypto::derive_inner_key_from_master(&master, pepper)?;
+                    container.open_with_key(&inner_key)?
+                } else {
+                    // Inner KDF differs from outer profile — must re-derive.
+                    container.open(password, pepper, _pqc_sk)?
+                };
                 return Ok(Some(plaintext));
             }
             bucket += 64;
         }
 
-        // If recommended() didn't match any bucket, try hardened() next.
+        // If this profile didn't match any bucket, try the next one.
         // After both profiles are exhausted, fall through to Ok(None).
-        if pi == profiles.len() - 1 {
-            // Both profiles exhausted — not a v4 container (or wrong password).
-        }
     }
     Ok(None)
 }
