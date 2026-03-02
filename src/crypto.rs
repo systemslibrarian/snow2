@@ -53,7 +53,7 @@ const HKDF_LABEL_PEPPER_BINDING: &[u8] = b"snow2/pepper-binding";
 const HKDF_LABEL_OUTER_KEY: &[u8] = b"snow2/outer-key";
 
 /// Argon2id parameters (authenticated in the container header).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KdfParams {
     /// Memory cost in kibibytes.
     pub m_cost_kib: u32,

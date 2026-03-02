@@ -63,13 +63,19 @@ pub fn embed_bits(carrier_text: &str, bits: &[bool]) -> Result<String> {
             // Remove any existing trailing zero-width markers to avoid ambiguity.
             let cleaned = strip_trailing_zw(content);
 
-            // Append up to BITS_PER_LINE ZW chars for this line.
+            // Append exactly BITS_PER_LINE ZW chars for this line.
+            // If fewer data bits remain, pad with zero-bits to maintain
+            // byte alignment during extraction.
             let mut suffix = String::new();
             for _ in 0..BITS_PER_LINE {
-                if bit_idx < bits.len() {
-                    suffix.push(if bits[bit_idx] { ZW1 } else { ZW0 });
+                let bit = if bit_idx < bits.len() {
+                    let b = bits[bit_idx];
                     bit_idx += 1;
-                }
+                    b
+                } else {
+                    false // zero-pad to fill the line
+                };
+                suffix.push(if bit { ZW1 } else { ZW0 });
             }
             out_lines.push(format!("{cleaned}{suffix}{cr}"));
         } else {
@@ -169,13 +175,20 @@ pub fn embed_bits_with_padding(carrier_text: &str, bits: &[bool]) -> anyhow::Res
         let cleaned = strip_trailing_zw(content);
 
         if bit_idx < bits.len() {
-            // Embed real data bits
+            // Embed real data bits, always emitting exactly BITS_PER_LINE
+            // ZW chars per line.  If fewer than BITS_PER_LINE data bits
+            // remain (partial last line), pad with zero-bits so extraction
+            // stays byte-aligned.
             let mut suffix = String::new();
             for _ in 0..BITS_PER_LINE {
-                if bit_idx < bits.len() {
-                    suffix.push(if bits[bit_idx] { ZW1 } else { ZW0 });
+                let bit = if bit_idx < bits.len() {
+                    let b = bits[bit_idx];
                     bit_idx += 1;
-                }
+                    b
+                } else {
+                    false // zero-pad to fill the line
+                };
+                suffix.push(if bit { ZW1 } else { ZW0 });
             }
             out_lines.push(format!("{cleaned}{suffix}{cr}"));
         } else {
