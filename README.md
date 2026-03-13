@@ -89,8 +89,12 @@ Extraction will fail if the pepper is not provided — even if the password is c
 This is useful when you want "password + something else you know" by policy.
 
 ### Secure Memory
-- **SecureVec**: mlock'd, guard-paged, zeroize-on-drop memory buffers (native targets)
+- **SecureVec**: mlock'd, dual-guard-paged, zeroize-on-drop memory buffers (native targets)
+  - Leading and trailing guard pages (PROT_NONE) catch underflows and overflows
+  - `MADV_DONTDUMP` (Linux) excludes secure buffers from core dumps
+  - Optional `enable_paranoid_memory()` calls `mlockall` to pin all process pages
 - Intermediate plaintext from AEAD decryption is zeroized after copy to SecureVec
+- Decompression temporaries are explicitly zeroized before drop
 - Passwords zeroized from memory after use
 - On WASM targets, falls back to zeroize-on-drop Vec wrappers (no mlock available)
 
@@ -401,7 +405,7 @@ The 49-byte binary header contains:
 [flags (1)] [m_cost_log2 (1)] [t_cost u16 LE (2)] [p_cost (1)] [salt (16)] [nonce (24)] [plaintext_len u32 LE (4)]
 ```
 
-Flags byte: `bit 0` = pepper_required, `bit 1` = compressed, `bits 2-3` = mode, `bits 4-7` = AEAD algorithm.
+Flags byte: `bit 0` = pepper_required, `bit 1` = compressed, `bits 2-3` = mode, `bits 4-5` = AEAD algorithm, `bits 6-7` = reserved (must be zero).
 
 The header is authenticated as AEAD additional data (AAD). Plaintext is optionally deflate-compressed before encryption.
 
@@ -561,7 +565,7 @@ SNOW2 preserves the spirit but is a complete rewrite:
 - **Steg resistance**: Constant-size padding, random carrier fill, outer encryption makes bitstream indistinguishable from uniform random (chi-squared ≈ 255)
 - **Modes**: Classic trailing whitespace (tribute mode, 1 bit/line) + zero-width Unicode (web-friendly, 8 bits/line)
 - **Optional PQC**: Hybrid Kyber1024 + Dilithium5 post-quantum crypto
-- **Secure memory**: mlock'd buffers with guard pages, zeroize-on-drop
+- **Secure memory**: mlock'd buffers with dual guard pages, zeroize-on-drop, MADV_DONTDUMP
 
 What remains the same:
 - Text-steganography identity ("hide in plain sight")
