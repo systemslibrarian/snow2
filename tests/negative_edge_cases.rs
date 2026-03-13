@@ -226,6 +226,58 @@ fn container_with_unsupported_version() {
 }
 
 #[test]
+fn compact_header_non_canonical_length_rejected() {
+    // v3 compact container with header_len larger than canonical 57 bytes.
+    let mut compact_hdr = vec![0u8; 58];
+    compact_hdr[0] = 0; // mode: classic-trailing
+    compact_hdr[1] = 0; // aead: XChaCha20-Poly1305
+    compact_hdr[2..6].copy_from_slice(&(64 * 1024u32).to_le_bytes());
+    compact_hdr[6..10].copy_from_slice(&(3u32).to_le_bytes());
+    compact_hdr[10] = 1; // p_cost
+    compact_hdr[11] = 32; // out_len
+    compact_hdr[12] = 0; // pepper_required
+    compact_hdr[53..57].copy_from_slice(&(1u32).to_le_bytes());
+    compact_hdr[57] = 0xAA; // non-canonical extra byte
+
+    let mut input = Vec::new();
+    input.extend_from_slice(b"SNOW2");
+    input.push(3); // compact version
+    input.extend_from_slice(&(compact_hdr.len() as u32).to_le_bytes());
+    input.extend_from_slice(&compact_hdr);
+    input.push(0x42); // non-empty ciphertext placeholder
+
+    let err = Snow2Container::from_bytes(&input).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.to_lowercase().contains("length mismatch"),
+        "expected compact canonical-length rejection, got: {msg}"
+    );
+}
+
+#[test]
+fn v4_reserved_flag_bits_rejected() {
+    // v4 wire format: [version=4][49-byte header][ciphertext]
+    let mut hdr = [0u8; 49];
+    hdr[0] = 0x80; // reserved bit set (bit7)
+    hdr[1] = 16; // m_cost_log2 = 16 (65536 KiB)
+    hdr[2..4].copy_from_slice(&(3u16).to_le_bytes()); // t_cost
+    hdr[4] = 1; // p_cost
+    hdr[45..49].copy_from_slice(&(1u32).to_le_bytes());
+
+    let mut input = Vec::new();
+    input.push(4);
+    input.extend_from_slice(&hdr);
+    input.push(0x01); // non-empty ciphertext placeholder
+
+    let err = Snow2Container::from_bytes_v4(&input).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.to_lowercase().contains("reserved bits"),
+        "expected reserved-bit rejection, got: {msg}"
+    );
+}
+
+#[test]
 fn container_with_missing_ciphertext() {
     // Valid header but no ciphertext after it
     let header = serde_json::json!({
