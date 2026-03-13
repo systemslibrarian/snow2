@@ -13,6 +13,7 @@ use subtle::ConstantTimeEq;
 use flate2::write::{DeflateDecoder, DeflateEncoder};
 use flate2::Compression;
 use std::io::Write;
+use zeroize::Zeroize;
 
 #[cfg(feature = "pqc")]
 use pqcrypto_traits::{
@@ -617,10 +618,12 @@ impl Snow2Container {
             decoder
                 .write_all(&decrypted)
                 .context("deflate decompress failed")?;
-            let raw = decoder
+            let mut raw = decoder
                 .finish()
                 .context("deflate decompress finish failed")?;
-            SecureVec::from_slice(&raw).context("SecureVec creation failed")?
+            let secure = SecureVec::from_slice(&raw).context("SecureVec creation failed");
+            raw.zeroize();
+            secure?
         } else {
             decrypted
         };
@@ -663,10 +666,12 @@ impl Snow2Container {
             decoder
                 .write_all(&decrypted)
                 .context("deflate decompress failed")?;
-            let raw = decoder
+            let mut raw = decoder
                 .finish()
                 .context("deflate decompress finish failed")?;
-            SecureVec::from_slice(&raw).context("SecureVec creation failed")?
+            let secure = SecureVec::from_slice(&raw).context("SecureVec creation failed");
+            raw.zeroize();
+            secure?
         } else {
             decrypted
         };
@@ -910,9 +915,9 @@ impl Snow2Container {
     /// Parse a compact binary header (v3) from bytes.
     fn parse_compact(input: &[u8], header_start: usize, header_end: usize) -> Result<Self> {
         let bin_hdr = &input[header_start..header_end];
-        if bin_hdr.len() < COMPACT_HDR_LEN {
+        if bin_hdr.len() != COMPACT_HDR_LEN {
             bail!(
-                "Compact header too short: {} bytes (expected {}).",
+                "Compact header length mismatch: {} bytes (expected {}).",
                 bin_hdr.len(),
                 COMPACT_HDR_LEN,
             );
@@ -931,7 +936,11 @@ impl Snow2Container {
         let t_cost = u32::from_le_bytes(bin_hdr[6..10].try_into().unwrap());
         let p_cost = bin_hdr[10] as u32;
         let out_len = bin_hdr[11] as u32;
-        let pepper_required = bin_hdr[12] != 0;
+        let pepper_flag = bin_hdr[12];
+        if pepper_flag > 1 {
+            bail!("Invalid compact pepper flag: {} (expected 0 or 1).", pepper_flag);
+        }
+        let pepper_required = pepper_flag == 1;
         let salt = &bin_hdr[13..29];
         let nonce = &bin_hdr[29..53];
         let plaintext_len = u32::from_le_bytes(bin_hdr[53..57].try_into().unwrap());
@@ -985,6 +994,12 @@ impl Snow2Container {
 
         let bin_hdr = &input[1..1 + V4_HDR_LEN];
         let flags = bin_hdr[0];
+        if (flags & 0b1100_0000) != 0 {
+            bail!(
+                "Invalid v4 flags byte: reserved bits must be zero (got 0x{:02x}).",
+                flags
+            );
+        }
         let pepper_required = (flags & 0x01) != 0;
         let _compressed = (flags & 0x02) != 0; // used during open_v4
         let mode_bits = (flags >> 2) & 0x03;
