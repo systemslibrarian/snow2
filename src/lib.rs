@@ -397,7 +397,7 @@ pub fn extract(
             // If we had enough raw data for the smallest v4 bucket (64 + 40 = 104 bytes)
             // and legacy failed on CRC/bitstream parsing (not crypto), the carrier
             // is almost certainly a v4 container with the wrong password.
-            let smallest_v4_blob = 64 + 40; // smallest bucket + nonce + tag
+            let smallest_v4_blob = 64 + 56; // smallest bucket + salt + nonce + tag
             let msg = format!("{legacy_err:#}");
             if raw_bytes.len() >= smallest_v4_blob
                 && (msg.contains("Not enough bits")

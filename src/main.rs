@@ -517,6 +517,9 @@ fn cmd_pqc_keygen(pk_path: &str, sk_path: &str, sk_password: Option<&str>) -> Re
     snow2::secure_fs::write_secure(sk_path, &sk_bytes, true)
         .with_context(|| format!("write secret key to {}", sk_path))?;
 
+    // Save length before zeroize (zeroize clears the Vec, setting len to 0).
+    let sk_bytes_len = sk_bytes.len();
+
     // Zeroize the secret key bytes now that they've been written to disk.
     use zeroize::Zeroize;
     sk_bytes.zeroize();
@@ -526,7 +529,7 @@ fn cmd_pqc_keygen(pk_path: &str, sk_path: &str, sk_password: Option<&str>) -> Re
     println!(
         "  Secret key: {} ({} bytes, encrypted={})",
         sk_path,
-        sk_bytes.len(),
+        sk_bytes_len,
         sk_password.is_some()
     );
     Ok(())
