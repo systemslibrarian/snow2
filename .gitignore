@@ -1,2 +1,8 @@
 /target/
 web_demo/pkg/
+
+# Demo / scratch artifacts (regenerate with scripts/make_carrier.sh)
+/carrier.txt
+/out.txt
+/recovered.bin
+/*.stego.txt

@@ -54,7 +54,7 @@ Then open http://localhost:8000.
    - Embeds bits into carrier lines as zero-width Unicode (U+200B = 0, U+200C = 1), **8 bits per line**
    - **Random-fills ALL remaining carrier lines** with random ZW content — eliminates statistical boundary between message and padding
 4. **Extraction** tries the v4 path first (extract all bits → try outer AEAD decrypt for each bucket size → unpad → parse v4 container → inner AEAD decrypt → optional inflate). Falls back to legacy CRC-framed path for v1/v3 containers.
-5. **Steg resistance**: The embedded bitstream is indistinguishable from uniform random noise (chi-squared ≈ 255 with 256/256 unique byte values). Every carrier line carries ZW content.
+5. **Payload indistinguishability**: Once the channel is decoded, the recovered bitstream is indistinguishable from uniform random noise (chi-squared ≈ 255 with 256/256 unique byte values, measured by `stress_test.mjs`). Every carrier line carries ZW content, which removes the message/padding boundary *inside* the channel — but also means the channel itself is trivially detectable by scanning for U+200B/U+200C. This hardens the payload, not the fact of embedding.
 
 ## File Structure
 

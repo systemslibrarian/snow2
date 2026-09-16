@@ -20,15 +20,16 @@ Matthew Kwan’s original **SNOW** (an acronym for *Steganographic Nature Of Whi
 ## 3. Post-Quantum Readiness
 
 * **The Original (SNOW):** Relied entirely on symmetric-key encryption via passwords.
-* **The Modernization (SNOW2):** SNOW2 introduces an optional Post-Quantum Cryptography (PQC) layer. It supports hybrid encryption using **Kyber1024** for key encapsulation and **Dilithium5** for detached signatures, ensuring that intercepted carrier files cannot be decrypted by future quantum computers.
+* **The Modernization (SNOW2):** SNOW2 introduces an optional Post-Quantum Cryptography (PQC) layer. It supports hybrid encryption using **Kyber1024** for key encapsulation and **Dilithium5** for detached signatures. These are the NIST round-3 parameter sets (via PQClean), not the standardized FIPS 203 ML-KEM / FIPS 204 ML-DSA, and are not interoperable with them.
 
-## 4. Defeating Steganalysis: Finding the Polar Bear
+## 4. Hardening the Payload: What the v4 Pipeline Does and Does Not Hide
 
-* **The Original (SNOW):** Relied purely on the invisibility of the characters. However, modern statistical analysis can easily detect the sudden boundary where a hidden message ends and normal text resumes.
-* **The Modernization (SNOW2):** SNOW2 actively engineers steganalysis resistance directly into the v4 pipeline. 
+* **The Original (SNOW):** Relied purely on the invisibility of the characters. Statistical analysis can detect the boundary where a hidden message ends and untouched text resumes.
+* **The Modernization (SNOW2):** SNOW2 hardens what an analyst learns *after* decoding the channel.
     * Payloads are padded to **constant-size buckets** (multiples of 64 bytes) to mask the true message length.
-    * An **outer AEAD layer** flattens the entropy of the bitstream, making it indistinguishable from uniform random noise.
-    * Most importantly, SNOW2 **random-fills ALL remaining carrier lines** with zero-width noise. This completely destroys the statistical boundary between the message and the padding.
+    * An **outer AEAD layer** flattens the entropy of the bitstream, making the decoded bytes indistinguishable from uniform random noise.
+    * SNOW2 **random-fills ALL remaining carrier lines** with zero-width noise, removing the statistical boundary between message and padding.
+* **The limit, stated plainly:** none of this hides the channel. Ordinary text contains no zero-width characters; a v4 carrier contains them on every non-empty line, so full coverage is itself a fingerprint. A `grep` for `U+200B`/`U+200C` or a `cat -A` finds either mode. SNOW2 hardens the payload, not the fact of embedding.
 
 ## 5. Architecture & Compression
 

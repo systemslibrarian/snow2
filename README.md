@@ -39,9 +39,9 @@ You provide:
 
 SNOW2 produces:
 
-- A modified text file that looks normal
-- A recoverable encrypted payload embedded invisibly
-- Embedded data that is statistically indistinguishable from random noise (v4 hardened pipeline)
+- A modified text file that reads as ordinary text
+- A recoverable encrypted payload, invisible when the text is read normally
+- A payload that, once decoded from the channel, is indistinguishable from random bytes (v4 hardened pipeline)
 
 Extraction requires the correct secrets. Tampering causes authenticated failure.
 
@@ -102,21 +102,45 @@ This is useful when you want "password + something else you know" by policy.
 - **V4 containers**: Outer AEAD (XChaCha20-Poly1305 with Argon2-derived key) provides cryptographic integrity over the entire embedded bitstream — no CRC framing needed
 - **Legacy containers (v1/v3)**: CRC-32 framing catches carrier corruption (whitespace stripping, copy-paste mangling) before the container parser or AEAD sees it
 
-### Steganalysis Resistance (V4 Hardened Pipeline)
-SNOW2 v4 implements six layers of steg resistance that make embedded data virtually undetectable:
+### Why Two AEAD Layers
+
+V4 encrypts twice, with two keys HKDF-expanded from the same Argon2id master secret:
+
+| Layer | Key material | Covers |
+|---|---|---|
+| Outer | password only (`snow2/outer-key`) | the entire embedded bitstream, padding included |
+| Inner | password + pepper (`snow2/aead-key`) | the container plaintext |
+
+The outer key deliberately **omits** the pepper. That is what lets extraction decrypt the outer layer with the password alone, read the authenticated `pepper_required` flag, and report *"this container requires a pepper"* rather than a generic authentication failure (`src/crypto.rs:216`).
+
+The cost is explicit: **the password alone is enough to learn that a v4 container is present and whether it demands a pepper.** The pepper protects the payload, not the payload's existence. Do not treat `--pepper-required` as a mechanism for hiding that a second secret is in play.
+
+### Payload Indistinguishability (V4 Hardened Pipeline)
+
+V4 hardens what the *payload* looks like to an analyst who has **already** decoded the channel. It does not hide the channel itself — see [Detectability](#detectability).
 
 1. **Random carrier padding** — every non-empty line in the carrier gets steganographic content (real data OR random padding), eliminating the statistical boundary between "message lines" and "clean lines"
-2. **Outer AEAD encryption** — the entire embedded bitstream is encrypted with an Argon2-derived key + XChaCha20-Poly1305, making it indistinguishable from uniform random noise
+2. **Outer AEAD encryption** — the entire embedded bitstream is encrypted with an Argon2-derived key + XChaCha20-Poly1305, so the decoded bytes are indistinguishable from uniform random noise
 3. **Constant-size containers** — payloads are padded to fixed-size buckets (multiples of 64 bytes), masking the actual message length
 4. **Plaintext compression** — deflate compression before encryption reduces the data footprint
 5. **Stripped wire format** — no magic bytes or header length on the wire (saves 9 bytes, removes ASCII signatures)
 6. **Packed binary header** — 49-byte binary header with log2-encoded KDF params (was 266-byte JSON)
 
-**Verified resistance metrics:**
-- 100% carrier line coverage (all lines carry ZW/whitespace content)
-- 256/256 unique byte values in embedded data
-- Chi-squared ≈ 255 (indistinguishable from uniform random; theoretical optimum = 255)
-- No detectable boundary between message data and carrier padding
+**What is measured, and where**
+
+`web_demo/stress_test.mjs` decodes the zero-width channel, reassembles the recovered bytes, and checks them for uniformity over 20 embed/extract rounds:
+
+| Measurement | Result |
+|---|---|
+| Unique byte values in the decoded bitstream | 256 / 256 |
+| Chi-squared vs. uniform over 256 buckets | ≈ 255 (test threshold `< 350`; expected value for a uniform source is 255) |
+| Carrier line coverage | 100% of non-empty lines carry channel content |
+
+Read those numbers precisely:
+
+- The chi-squared figure is computed **after** the channel has been located and decoded. It confirms the outer AEAD produces uniform output — which is what any correct AEAD must do. It says nothing about how hard the channel is to find.
+- The 100% coverage figure removes the message/padding boundary *inside* the channel. It is simultaneously the strongest signal that a channel is present at all: ordinary text contains no zero-width characters, and a v4 carrier contains them on every non-empty line.
+- Nothing in `tests/` measures detectability of the channel, and no claim of undetectability is made here.
 
 ---
 
@@ -126,8 +150,8 @@ SNOW2 supports **hybrid post-quantum encryption** via the optional `pqc` feature
 
 When enabled, containers use a **Version 2** format with:
 
-- **Kyber1024** (ML-KEM) — NIST-standardized lattice-based key encapsulation
-- **Dilithium5** (ML-DSA) — NIST-standardized lattice-based digital signatures
+- **Kyber1024** — lattice-based key encapsulation, via `pqcrypto-kyber` 0.8
+- **Dilithium5** — lattice-based digital signatures, via `pqcrypto-dilithium` 0.5
 - **Hybrid encryption** — Kyber KEM shared secret → HKDF → XChaCha20-Poly1305
 - **Authenticated containers** — every PQC container is signed with Dilithium5
 - **Encrypted key storage** — secret keys can be encrypted at rest with password-derived AEAD
@@ -136,6 +160,8 @@ When enabled, containers use a **Version 2** format with:
 - **Hardened file permissions** — secret key files written with 0o600 (Unix) via atomic rename
 
 PQC mode does not use passwords. Instead, you generate a keypair and use key files.
+
+> **These are the NIST round-3 parameter sets, not the final standards.** `pqcrypto-kyber` and `pqcrypto-dilithium` wrap PQClean's Kyber and Dilithium, which predate FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA) and differ from them in key derivation and hashing. SNOW2 v2 containers are therefore **not interoperable** with ML-KEM / ML-DSA implementations, and should not be described as NIST-standardized. Migrating would mean moving to `pqcrypto-mlkem` / `pqcrypto-mldsa` and minting a new container version.
 
 ### Build with PQC support
 ```bash
@@ -202,7 +228,13 @@ SNOW2 supports multiple embedding strategies.
 
 ## Important Limitations
 
-Whitespace steganography is inherently fragile. **However, SNOW2\u2019s v4 hardened pipeline makes the embedded data statistically undetectable in single-file analysis.**
+Whitespace steganography is inherently fragile, and the channel is not hard to find. V4 hardens the *payload* (see [Payload Indistinguishability](#payload-indistinguishability-v4-hardened-pipeline)); it does not make a modified carrier look unmodified.
+
+### Detectability
+- A `grep` for U+200B / U+200C, a `cat -A`, or any Unicode-aware linter finds the channel immediately. Neither mode resists an analyst who is looking for it.
+- V4's 100% line coverage makes this *easier*, not harder. Ordinary text has no zero-width characters and no trailing whitespace; a v4 carrier has them on every non-empty line. That uniformity is itself the fingerprint.
+- What V4 buys is that once the channel is found, the bits give nothing up: no magic bytes, no length field, no message/padding boundary, no plaintext.
+- Plainly: **casual readers see ordinary text; a motivated analyst who looks for the channel finds the channel.**
 
 ### Trailing whitespace (`classic-trailing` mode)
 - Most text editors have "trim trailing whitespace on save" enabled **by default** — VS Code, JetBrains, Vim, and others will silently destroy the payload on save
@@ -456,8 +488,8 @@ Extraction automatically detects the container version. V4 outer decryption is t
 ## Security Model
 
 ### What SNOW2 protects against
-- **Passive observers**: Carrier text looks normal; payload is invisible
-- **Statistical analysis (v4)**: Embedded data is indistinguishable from uniform random noise (chi-squared ≈ 255); all carrier lines carry content — no detectable message boundary
+- **Casual readers**: the carrier renders as ordinary text; nothing is visible when the file is read
+- **Analysis of the decoded bitstream (v4)**: once the channel is decoded, the bytes are indistinguishable from uniform random (chi-squared ≈ 255); every carrier line carries content, so there is no message/padding boundary inside the channel
 - **Wrong password/pepper**: AEAD authentication fails — no partial decryption
 - **Carrier tampering**: Outer + inner AEAD catch any modification; legacy CRC-32 catches stego corruption in old containers
 - **Header tampering**: Binary header is AEAD AAD — any modification causes auth failure
@@ -468,8 +500,10 @@ Extraction automatically detects the container version. V4 outer decryption is t
 - **File permission leaks**: Sensitive files written with restricted permissions via atomic rename
 
 ### What SNOW2 does NOT protect against
+- **Channel detection**: a scan for zero-width characters or trailing whitespace locates the channel in either mode. V4's full-line coverage makes a modified carrier *more* uniform than natural text, not less. See [Detectability](#detectability).
+- **Concealing that a pepper is required**: the outer AEAD key is password-only by design, so the password alone reveals that a v4 container is present and whether it is marked `pepper_required`. See [Why Two AEAD Layers](#why-two-aead-layers).
 - **Active carrier modification**: If someone can modify the carrier text (trim whitespace, normalize Unicode), extraction will fail. This is by design — integrity is mandatory.
-- **Carrier comparison**: If an adversary has both the original carrier and the modified carrier, they can diff the files and detect embedding. SNOW2 protects against single-file analysis, not differential analysis.
+- **Carrier comparison**: If an adversary has both the original carrier and the modified carrier, they can diff the files and detect embedding.
 - **Traffic analysis**: SNOW2 does not hide the fact that a file has been modified (file size changes, metadata, etc.)
 - **Guaranteed secure deletion**: File shredding is best-effort. SSDs, CoW filesystems, and journals may retain data.
 - **WASM security boundaries**: The browser demo uses zeroize-on-drop but cannot mlock memory
@@ -484,7 +518,7 @@ Extraction automatically detects the container version. V4 outer decryption is t
 
 - **Shred/wipe is best-effort only.** On SSDs with wear-leveling, CoW filesystems (btrfs, ZFS), or journaling filesystems, overwritten data may persist. For high-assurance deletion, use full-disk encryption and destroy the key.
 
-- **PQC is optional and experimental.** Post-quantum crypto (Kyber1024 + Dilithium5) is available as an optional feature for users who want it. It is not the default identity of the tool. PQC containers are significantly larger (~10 KB overhead) and use different trust assumptions (keypair-based, not password-based).
+- **PQC is optional and experimental.** Post-quantum crypto (Kyber1024 + Dilithium5) is available as an optional feature for users who want it. It is not the default identity of the tool. PQC containers are significantly larger (~10 KB overhead) and use different trust assumptions (keypair-based, not password-based). The parameter sets are NIST round-3 Kyber and Dilithium, **not** FIPS 203 ML-KEM / FIPS 204 ML-DSA, and are not interoperable with them.
 
 - **The browser/WASM demo is not the main security boundary.** It is a convenience UI for demonstration. In WASM, `mlock` is unavailable, and JavaScript's garbage collection may leave copies of sensitive data in memory.
 
@@ -562,9 +596,9 @@ SNOW2 preserves the spirit but is a complete rewrite:
 - **Encryption**: Dual-layer AEAD — inner XChaCha20-Poly1305 (Argon2id key + pepper) + outer XChaCha20-Poly1305 (Argon2id key, password-only)
 - **Key derivation**: Argon2id + HKDF-SHA256 (memory-hard, domain-separated)
 - **Integrity**: Dual AEAD authentication (outer + inner), legacy CRC-32 for old containers
-- **Steg resistance**: Constant-size padding, random carrier fill, outer encryption makes bitstream indistinguishable from uniform random (chi-squared ≈ 255)
+- **Payload indistinguishability**: Constant-size padding, random carrier fill, and outer encryption make the *decoded bitstream* indistinguishable from uniform random (chi-squared ≈ 255). The channel itself remains detectable in both modes.
 - **Modes**: Classic trailing whitespace (tribute mode, 1 bit/line) + zero-width Unicode (web-friendly, 8 bits/line)
-- **Optional PQC**: Hybrid Kyber1024 + Dilithium5 post-quantum crypto
+- **Optional PQC**: Hybrid Kyber1024 + Dilithium5 (NIST round-3 parameter sets, not FIPS 203/204)
 - **Secure memory**: mlock'd buffers with dual guard pages, zeroize-on-drop, MADV_DONTDUMP
 
 What remains the same:
