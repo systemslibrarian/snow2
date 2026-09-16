@@ -67,26 +67,24 @@ mod inner {
             // Best-effort Linux hardening: keep locked pages out of core dumps.
             #[cfg(target_os = "linux")]
             unsafe {
-                let _ = libc::madvise(
-                    alloc_base as *mut c_void,
-                    total_alloc,
-                    libc::MADV_DONTDUMP,
-                );
+                let _ = libc::madvise(alloc_base as *mut c_void, total_alloc, libc::MADV_DONTDUMP);
             }
 
             let leading_guard_ptr = alloc_base;
             let trailing_guard_ptr = unsafe { mem.add(aligned_data_len) };
             unsafe {
-                if libc::mprotect(leading_guard_ptr as *mut c_void, page_size, libc::PROT_NONE)
-                    != 0
+                if libc::mprotect(leading_guard_ptr as *mut c_void, page_size, libc::PROT_NONE) != 0
                 {
                     let err = std::io::Error::last_os_error();
                     libc::munlock(alloc_base as *const c_void, total_alloc);
                     libc::free(alloc_base as *mut c_void);
                     return Err(anyhow!("mprotect leading guard page failed: {}", err));
                 }
-                if libc::mprotect(trailing_guard_ptr as *mut c_void, page_size, libc::PROT_NONE)
-                    != 0
+                if libc::mprotect(
+                    trailing_guard_ptr as *mut c_void,
+                    page_size,
+                    libc::PROT_NONE,
+                ) != 0
                 {
                     let err = std::io::Error::last_os_error();
                     libc::mprotect(

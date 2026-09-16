@@ -643,7 +643,18 @@ impl Snow2Container {
     ///
     /// Used by the extraction pipeline where the master secret was already
     /// derived via Argon2.  Avoids a redundant Argon2 run.
-    pub fn open_with_key(&self, inner_key: &crypto::ZeroizingKey) -> Result<SecureVec> {
+    ///
+    /// `pepper` is passed purely so the container's `pepper_required` policy
+    /// can be enforced here, exactly as `open_v4` does.  The pepper is already
+    /// bound into `inner_key` via HKDF; it is not used for derivation again.
+    /// Without this parameter a caller on the pre-derived-key path silently
+    /// skips the policy check and a missing pepper degrades into a generic
+    /// AEAD failure instead of a clear diagnostic.
+    pub fn open_with_key(
+        &self,
+        inner_key: &crypto::ZeroizingKey,
+        pepper: Option<&[u8]>,
+    ) -> Result<SecureVec> {
         let aad = self
             .raw_header_aad
             .as_ref()
@@ -652,10 +663,8 @@ impl Snow2Container {
         let flags = aad[0];
         let compressed = (flags & 0x02) != 0;
 
-        if self.header.pepper_required {
-            // Pepper was already bound into the key via HKDF during derivation.
-            // No separate check needed here — if wrong pepper was used, AEAD
-            // will fail.
+        if self.header.pepper_required && pepper.is_none() {
+            bail!("Pepper is required by this container, but none was provided.");
         }
 
         let nonce = &aad[21..45];
@@ -938,7 +947,10 @@ impl Snow2Container {
         let out_len = bin_hdr[11] as u32;
         let pepper_flag = bin_hdr[12];
         if pepper_flag > 1 {
-            bail!("Invalid compact pepper flag: {} (expected 0 or 1).", pepper_flag);
+            bail!(
+                "Invalid compact pepper flag: {} (expected 0 or 1).",
+                pepper_flag
+            );
         }
         let pepper_required = pepper_flag == 1;
         let salt = &bin_hdr[13..29];

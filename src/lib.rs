@@ -334,7 +334,7 @@ fn try_v4_extract(
                 let plaintext = if inner_kdf == *outer_params {
                     // Same KDF params + same salt → identical master secret.
                     let inner_key = crypto::derive_inner_key_from_master(&master, pepper)?;
-                    container.open_with_key(&inner_key)?
+                    container.open_with_key(&inner_key, pepper)?
                 } else {
                     // Inner KDF differs from outer profile — must re-derive.
                     container.open(password, pepper, _pqc_sk)?
