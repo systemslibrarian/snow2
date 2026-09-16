@@ -189,6 +189,33 @@ pub fn embed_with_options(
         );
     }
 
+    // ── PQC containers take the legacy CRC-framed path ──────────────────
+    //
+    // The v4 outer AEAD below is keyed by Argon2id over the *password*, but
+    // PQC mode is keypair-based and deliberately has no password (the CLI
+    // passes an empty one).  Wrapping a v2 PQC container in the outer layer
+    // therefore fails outright with "Password must not be empty", which is
+    // exactly how `cargo test --features pqc` was broken.
+    //
+    // So PQC uses the pre-v4 bitstream: CRC-32 framing, no bucket padding, no
+    // outer encryption.  `extract` reaches it through its legacy fallback,
+    // because outer decryption cannot succeed without a password and returns
+    // `Ok(None)`.
+    //
+    // The tradeoff is explicit and documented in the README: PQC carriers do
+    // not get v4's length masking or full-line random fill, so their payload
+    // length is observable and only the marked lines carry content.  Fixing
+    // that properly means keying the outer layer from the Kyber shared secret,
+    // which is a new container version, not a patch.
+    #[cfg(feature = "pqc")]
+    if opts.security.pqc_enabled {
+        let bits = stego::bytes_to_bits(&container_bytes)?;
+        return match mode {
+            Mode::ClassicTrailing => stego::classic_trailing::embed_bits(carrier_text, &bits),
+            Mode::WebSafeZeroWidth => stego::websafe_zw::embed_bits(carrier_text, &bits),
+        };
+    }
+
     // Constant-size padding
     let inner_len = 4 + container_bytes.len();
     let bucket = container::pad_bucket(inner_len);

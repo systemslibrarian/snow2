@@ -21,7 +21,7 @@ fn pepper_required_blocks_missing_pepper_on_embed() {
         pepper_required: true,
         ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec };
+    let opts = EmbedOptions::new(sec);
 
     let err = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -49,7 +49,7 @@ fn pepper_required_blocks_missing_pepper_on_extract() {
         pepper_required: true,
         ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec };
+    let opts = EmbedOptions::new(sec);
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -82,16 +82,16 @@ fn kdf_tuning_roundtrip_still_works() {
     let carrier = big_carrier(8000);
     let payload = b"kdf tuning test";
 
-    let sec = EmbedSecurityOptions {
-        pepper_required: true,
-        kdf: KdfParams {
+    let sec = EmbedSecurityOptions::new(
+        KdfParams {
             m_cost_kib: 128 * 1024, // 128 MiB
             t_cost: 4,
             p_cost: 1,
             out_len: 32,
         },
-    };
-    let opts = EmbedOptions { security: sec };
+        true,
+    );
+    let opts = EmbedOptions::new(sec);
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -188,7 +188,7 @@ fn hardened_profile_roundtrip() {
     let payload = b"hardened profile test";
 
     let sec = EmbedSecurityOptions::hardened();
-    let opts = EmbedOptions { security: sec };
+    let opts = EmbedOptions::new(sec);
 
     let out_carrier = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -231,7 +231,7 @@ fn embed_rejects_weak_kdf_at_seal_time() {
         },
         ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec };
+    let opts = EmbedOptions::new(sec);
 
     let err =
         snow2::embed_with_options(Mode::ClassicTrailing, &carrier, payload, b"pw", None, &opts)
@@ -258,7 +258,7 @@ fn embed_rejects_absurd_kdf_at_seal_time() {
         },
         ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec };
+    let opts = EmbedOptions::new(sec);
 
     let err =
         snow2::embed_with_options(Mode::ClassicTrailing, &carrier, payload, b"pw", None, &opts)

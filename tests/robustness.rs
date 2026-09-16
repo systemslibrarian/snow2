@@ -60,7 +60,7 @@ fn outer_layer_does_not_bind_pepper() {
         pepper_required: true,
         ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec };
+    let opts = EmbedOptions::new(sec);
 
     let stego = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -619,11 +619,8 @@ fn embed_with_hardened_kdf_roundtrips() {
     let carrier = big_carrier(5000);
     let payload = b"hardened kdf roundtrip";
 
-    let sec = EmbedSecurityOptions {
-        kdf: snow2::crypto::KdfParams::hardened(),
-        pepper_required: false,
-    };
-    let opts = EmbedOptions { security: sec };
+    let sec = EmbedSecurityOptions::new(snow2::crypto::KdfParams::hardened(), false);
+    let opts = EmbedOptions::new(sec);
 
     let stego =
         snow2::embed_with_options(Mode::ClassicTrailing, &carrier, payload, b"pw", None, &opts)

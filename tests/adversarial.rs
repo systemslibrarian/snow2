@@ -166,11 +166,8 @@ fn hardened_kdf_embed_wrong_password_fails() {
     let carrier = big_carrier(5000);
     let payload = b"hardened wrong pw test";
 
-    let sec = EmbedSecurityOptions {
-        kdf: KdfParams::hardened(),
-        pepper_required: false,
-    };
-    let opts = EmbedOptions { security: sec };
+    let sec = EmbedSecurityOptions::new(KdfParams::hardened(), false);
+    let opts = EmbedOptions::new(sec);
 
     let stego = snow2::embed_with_options(
         Mode::ClassicTrailing,
@@ -195,11 +192,8 @@ fn hardened_kdf_embed_with_pepper_wrong_pepper_fails() {
     let carrier = big_carrier(5000);
     let payload = b"hardened pepper test";
 
-    let sec = EmbedSecurityOptions {
-        kdf: KdfParams::hardened(),
-        pepper_required: true,
-    };
-    let opts = EmbedOptions { security: sec };
+    let sec = EmbedSecurityOptions::new(KdfParams::hardened(), true);
+    let opts = EmbedOptions::new(sec);
 
     let stego = snow2::embed_with_options(
         Mode::ClassicTrailing,

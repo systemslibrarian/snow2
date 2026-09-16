@@ -64,3 +64,11 @@ lto = true
 codegen-units = 1
 opt-level = "z"
 strip = true
+
+# The test suite runs Argon2id hundreds of times. Unoptimized, the dependency
+# crates make `cargo test` roughly 50x slower (the adversarial suite alone took
+# 481s in CI) without testing anything extra — a slow suite is a suite people
+# stop running. Optimize dependencies only; snow2's own code stays unoptimized
+# so debug assertions and overflow checks still apply to it.
+[profile.dev.package."*"]
+opt-level = 2

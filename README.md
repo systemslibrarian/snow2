@@ -161,6 +161,17 @@ When enabled, containers use a **Version 2** format with:
 
 PQC mode does not use passwords. Instead, you generate a keypair and use key files.
 
+> **PQC carriers do not get the v4 hardening.** The v4 outer AEAD is keyed by
+> Argon2id over the password, and PQC mode has no password, so PQC containers
+> are embedded with the pre-v4 bitstream: CRC-32 framing, no constant-size
+> bucket padding, and no random fill of unused lines. Two consequences follow —
+> the payload length is observable from how many lines carry markers, and only
+> those lines carry content, so the message/padding boundary that v4 removes is
+> visible again. Keying the outer layer from the Kyber shared secret would fix
+> this, but that is a new container version rather than a patch. Until then,
+> treat PQC mode as protecting *confidentiality against a future quantum
+> adversary*, not as the stronger steganographic channel.
+
 > **These are the NIST round-3 parameter sets, not the final standards.** `pqcrypto-kyber` and `pqcrypto-dilithium` wrap PQClean's Kyber and Dilithium, which predate FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA) and differ from them in key derivation and hashing. SNOW2 v2 containers are therefore **not interoperable** with ML-KEM / ML-DSA implementations, and should not be described as NIST-standardized. Migrating would mean moving to `pqcrypto-mlkem` / `pqcrypto-mldsa` and minting a new container version.
 
 ### Build with PQC support
@@ -545,9 +556,22 @@ cargo build --release --target x86_64-unknown-linux-musl
 
 ### Run tests
 ```bash
-cargo test -p snow2              # without PQC
-cargo test -p snow2 --features pqc  # with PQC
+# 178 tests, default features
+cargo test --no-fail-fast -- --test-threads=2
+
+# 188 tests, adds tests/pqc_roundtrip.rs
+cargo test --features pqc --no-fail-fast -- --test-threads=2
 ```
+
+`--no-fail-fast` matters: without it `cargo test` stops at the first failing
+binary, so a break in an early suite hides everything after it.
+
+Both configurations are gated in CI as separate jobs, along with
+`cargo clippy --all-targets -- -D warnings` (with and without `--features pqc`)
+and `cargo fmt --check`. Note that `tests/steganalysis.rs` asserts the
+detectability properties described under [Detectability](#detectability) — if you
+change the embedding so the channel becomes harder to find, those tests are
+meant to fail and prompt a README update.
 
 ---
 
@@ -633,9 +657,14 @@ tests/
   roundtrip.rs        Classic embed/extract roundtrip tests
   pepper_policy.rs    Pepper policy, KDF bounds, embed-side validation,
                       malformed container rejection tests
-  pqc_roundtrip.rs    PQC keygen + embed/extract roundtrip test
+  pqc_roundtrip.rs    PQC keygen + embed/extract roundtrip [requires --features pqc]
   negative_edge_cases.rs  Malformed input, corruption, boundary tests
   cross_platform.rs   CRLF/LF, Unicode, platform survivability tests
+  adversarial.rs      Hostile inputs, truncation, cross-mode confusion
+  robustness.rs       Carrier mangling, KDF profiles, atomic writes
+  websafe_zw_platform.rs  Zero-width survivability across platform behaviours
+  steganalysis.rs     Executable form of the README's steganalysis claims:
+                      payload uniformity AND channel detectability
 fuzz/
   fuzz_targets/       Fuzz targets for container parse, bitstream, stego extract
 scripts/

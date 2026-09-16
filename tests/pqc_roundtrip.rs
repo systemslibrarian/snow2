@@ -17,8 +17,8 @@ fn test_pqc_keygen() {
     let sk = format!("{dir}/key.sk");
     fs::create_dir_all(dir).unwrap();
 
-    let mut cmd = Command::new("target/debug/snow2");
-    cmd.args(&["pqc-keygen", "--pk-out", &pk, "--sk-out", &sk]);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_snow2"));
+    cmd.args(["pqc-keygen", "--pk-out", &pk, "--sk-out", &sk]);
 
     let (success, stdout, stderr) = run_command(&mut cmd);
     assert!(
@@ -55,8 +55,8 @@ fn test_pqc_roundtrip() {
     fs::write(&carrier_file, &carrier).unwrap();
 
     // 1. Key Generation
-    let mut keygen_cmd = Command::new("target/debug/snow2");
-    keygen_cmd.args(&["pqc-keygen", "--pk-out", &pk_file, "--sk-out", &sk_file]);
+    let mut keygen_cmd = Command::new(env!("CARGO_BIN_EXE_snow2"));
+    keygen_cmd.args(["pqc-keygen", "--pk-out", &pk_file, "--sk-out", &sk_file]);
     let (success, stdout, stderr) = run_command(&mut keygen_cmd);
     assert!(
         success,
@@ -65,8 +65,8 @@ fn test_pqc_roundtrip() {
     );
 
     // 2. Embed
-    let mut embed_cmd = Command::new("target/debug/snow2");
-    embed_cmd.args(&[
+    let mut embed_cmd = Command::new(env!("CARGO_BIN_EXE_snow2"));
+    embed_cmd.args([
         "embed",
         "--mode",
         "classic-trailing",
@@ -87,8 +87,8 @@ fn test_pqc_roundtrip() {
     );
 
     // 3. Extract
-    let mut extract_cmd = Command::new("target/debug/snow2");
-    extract_cmd.args(&[
+    let mut extract_cmd = Command::new(env!("CARGO_BIN_EXE_snow2"));
+    extract_cmd.args([
         "extract",
         "--mode",
         "classic-trailing",

@@ -466,7 +466,7 @@ fn pepper_required_with_empty_pepper_is_an_error() {
         pepper_required: true,
         ..EmbedSecurityOptions::default()
     };
-    let opts = EmbedOptions { security: sec };
+    let opts = EmbedOptions::new(sec);
 
     // Empty pepper slice should NOT count as "provided"
     // This depends on implementation — document the behavior

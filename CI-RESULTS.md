@@ -43,6 +43,45 @@ policy exactly as `open_v4` does, so the pre-derived-key path cannot silently sk
 **Lesson for this file:** a `needs:`-gated job that is skipped is not a job that
 passed. Any future claim here should cite a run, not a local invocation.
 
+### Structural fix (2026-09-16)
+
+Restoring green was not enough — the workflow was built so that one lint could
+silence everything. Changes:
+
+- **`test`, `test-pqc` and `wasm` no longer declare `needs: check`.** A
+  formatting failure can no longer skip the test suite. They run in parallel
+  with `check` instead.
+- **`--no-fail-fast` on the test jobs**, so one broken suite does not hide
+  failures in the others (which is how the local reproduction was found).
+- **New `Rust Tests (pqc feature)` job.** The `pqc` feature had never been
+  built by CI at all. See below.
+- **`cargo clippy --all-targets --features pqc`** added to `check`; clippy had
+  never linted the PQC code paths.
+- **`node web_demo/stress_test.mjs`** added to the `wasm` job. This is where the
+  chi-squared and line-coverage figures quoted in the README come from, and CI
+  had never run it, so those numbers were unverifiable by any automated gate.
+  The same properties are now also asserted in `tests/steganalysis.rs`.
+
+### What the missing PQC coverage was hiding
+
+With `--features pqc` never built by CI, two failures had accumulated:
+
+1. **The test suite did not compile.** `EmbedOptions` / `EmbedSecurityOptions`
+   carry `#[cfg(feature = "pqc")]` fields, so exhaustive struct literals in the
+   integration tests failed with E0063 as soon as the feature was on. Fixed by
+   adding `EmbedOptions::new()` / `EmbedSecurityOptions::new()` constructors
+   that fill feature-gated fields, and using them from the tests — so test code
+   compiles identically with and without the feature.
+2. **PQC embedding was broken end-to-end.** `embed --pqc-pk` failed with
+   "Password must not be empty": `embed_with_options` wrapped every container in
+   the v4 outer AEAD, which is keyed by Argon2id over the password, but PQC mode
+   is keypair-based and has no password. PQC containers now take the pre-v4
+   CRC-framed path; the steganographic tradeoff that implies is documented in
+   the README's PQC section.
+
+`tests/pqc_roundtrip.rs` also hardcoded `target/debug/snow2`, so it could only
+pass in a debug build; it now uses `env!("CARGO_BIN_EXE_snow2")`.
+
 ---
 
 ## CI Workflow Files
@@ -87,12 +126,19 @@ passed. Any future claim here should cite a run, not a local invocation.
 |---|---|---|
 | `cargo fmt --check` | ✅ | — |
 | `cargo clippy -- -D warnings` | ✅ | — |
+| `cargo clippy --features pqc -- -D warnings` | ✅ | — |
 | `cargo build --release` | ✅ | — |
 | `cargo test` | ✅ | — |
+| `cargo test --features pqc` | ✅ | — |
 | WASM build | ✅ | ✅ |
 | `test_wasm.mjs` | ✅ | ✅ |
 | `test_download_upload.mjs` | ✅ | — |
+| `stress_test.mjs` | ✅ | — |
 | Fuzz | — | — |
+
+Fuzz targets exist under `fuzz/` but are not wired into CI; they require a
+nightly toolchain and a time budget, so they remain a manual gate. See
+FUZZ-RESULTS.md. This row is left blank deliberately rather than implied.
 
 **All Rust quality gates are covered by CI** — but coverage is not the same as
 execution. See [CI Outage](#ci-outage-2026-03-02--2026-09-16): the `needs: check`

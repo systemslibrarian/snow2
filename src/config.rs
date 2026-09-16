@@ -36,6 +36,22 @@ pub struct EmbedOptions {
     pub pqc_keys: PqKeys,
 }
 
+impl EmbedOptions {
+    /// Construct from security options alone, leaving feature-gated fields
+    /// (`pqc_keys`) at their default.
+    ///
+    /// Prefer this over `EmbedOptions { security }`: that literal only
+    /// compiles when the `pqc` feature is off, which is why the integration
+    /// tests would not build under `--features pqc`.
+    pub fn new(security: EmbedSecurityOptions) -> Self {
+        Self {
+            security,
+            #[cfg(feature = "pqc")]
+            pqc_keys: PqKeys::default(),
+        }
+    }
+}
+
 impl Default for EmbedSecurityOptions {
     fn default() -> Self {
         Self {
@@ -48,6 +64,22 @@ impl Default for EmbedSecurityOptions {
 }
 
 impl EmbedSecurityOptions {
+    /// Construct from the fields that exist in every build configuration.
+    ///
+    /// Feature-gated fields (`pqc_enabled`) take their default value.  Prefer
+    /// this over a struct literal: a literal must name every field that is
+    /// currently compiled in, so it stops compiling the moment a `#[cfg]`
+    /// field is added or `--features pqc` is toggled.  That is precisely what
+    /// broke `cargo test --features pqc`.
+    pub fn new(kdf: KdfParams, pepper_required: bool) -> Self {
+        Self {
+            kdf,
+            pepper_required,
+            #[cfg(feature = "pqc")]
+            pqc_enabled: false,
+        }
+    }
+
     /// Convenience: strict mode expects a pepper.
     pub fn strict_with_pepper() -> Self {
         Self {
