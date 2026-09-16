@@ -29,7 +29,7 @@ is password-only (see *Why Two AEAD Layers* in the README).
 
 **Stage 2 — the failure gets hidden (`0d23249`, 2026-03-13).**
 `0d23249` landed formatting that `cargo fmt --check` rejects (`src/container.rs:938`,
-`src/secure_mem.rs:67`). Because `test` and `wasm` declare `needs: check`, both jobs
+`src/secure_mem.rs:67`). Because `test` and `wasm` declared `needs: check` at the time, both jobs
 stopped running and reported as **skipped** rather than failed. From `0d23249` through
 `48b8305` every push showed `Check=failure, Rust Tests=skipped, WASM=skipped`, so the
 Stage 1 regression sat undetected. GitHub has since expired the `72f824b` / `1f8d3e8`
