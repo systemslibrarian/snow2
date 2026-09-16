@@ -4,6 +4,14 @@
 **Date:** 2025-07-21
 **Fuzzer:** cargo-fuzz / libFuzzer via `cargo +nightly fuzz`
 
+> **Status (2026-09-16):** the numbers below are a **one-off manual run from
+> 2025-07-21** and have not been reproduced since. Fuzzing is now on a calendar
+> instead of in someone's memory: `.github/workflows/fuzz.yml` runs all 8
+> targets daily at 04:17 UTC, 60s each, uploading crash artifacts on failure.
+> It is intentionally not a PR gate — see CI-RESULTS.md. Until that schedule has
+> produced its first completed run, treat this table as history, not as current
+> assurance.
+
 ---
 
 ## Fuzz Targets

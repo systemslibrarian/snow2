@@ -1,0 +1,82 @@
+name: Fuzz (scheduled)
+
+# Deliberately NOT a pull-request gate.
+#
+# This needs a nightly toolchain and a minute per target. Wired into PRs it
+# would be the first thing bypassed by anyone in a hurry, and a gate people
+# route around is worse than no gate — it teaches the team that red is
+# negotiable. CI-RESULTS.md keeps the Fuzz row blank until this workflow has
+# actually produced an artifact.
+on:
+  schedule:
+    # 04:17 UTC daily. Off-the-hour to avoid GitHub's scheduling pileup, which
+    # delays or drops runs queued exactly on the hour.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      seconds_per_target:
+        description: 'Fuzzing seconds per target'
+        required: false
+        default: '60'
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: cargo-fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # One job per target: a crash in one target must not cancel the others,
+      # and the matrix cell name tells you which target failed without opening
+      # a log.
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_container_parse
+          - fuzz_v4_header
+          - fuzz_outer_aead
+          - fuzz_bits_to_bytes
+          - fuzz_crlf_mixed
+          - fuzz_classic_extract
+          - fuzz_extract_pipeline
+          - fuzz_websafe_extract
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          SECS: ${{ github.event.inputs.seconds_per_target || '60' }}
+        # -max_total_time bounds the run; -rss_limit_mb guards against a
+        # runaway allocation being reported as a crash on the runner.
+        run: |
+          cargo fuzz run "${{ matrix.target }}" -- \
+            -max_total_time="$SECS" \
+            -rss_limit_mb=4096
+
+      # Any crash or slow-unit input libFuzzer writes must leave the runner,
+      # otherwise a red run tells you nothing reproducible.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/
+            fuzz/corpus/
+          if-no-files-found: ignore
+          retention-days: 30

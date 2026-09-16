@@ -144,78 +144,6 @@ Read those numbers precisely:
 
 ---
 
-## Post-Quantum Cryptography (Optional)
-
-SNOW2 supports **hybrid post-quantum encryption** via the optional `pqc` feature flag.
-
-When enabled, containers use a **Version 2** format with:
-
-- **Kyber1024** — lattice-based key encapsulation, via `pqcrypto-kyber` 0.8
-- **Dilithium5** — lattice-based digital signatures, via `pqcrypto-dilithium` 0.5
-- **Hybrid encryption** — Kyber KEM shared secret → HKDF → XChaCha20-Poly1305
-- **Authenticated containers** — every PQC container is signed with Dilithium5
-- **Encrypted key storage** — secret keys can be encrypted at rest with password-derived AEAD
-  - Versioned format (`SNOW2EK\0` magic + version byte) for future evolution
-  - Version byte authenticated as AEAD AAD to prevent downgrade attacks
-- **Hardened file permissions** — secret key files written with 0o600 (Unix) via atomic rename
-
-PQC mode does not use passwords. Instead, you generate a keypair and use key files.
-
-> **PQC carriers do not get the v4 hardening.** The v4 outer AEAD is keyed by
-> Argon2id over the password, and PQC mode has no password, so PQC containers
-> are embedded with the pre-v4 bitstream: CRC-32 framing, no constant-size
-> bucket padding, and no random fill of unused lines. Two consequences follow —
-> the payload length is observable from how many lines carry markers, and only
-> those lines carry content, so the message/padding boundary that v4 removes is
-> visible again. Keying the outer layer from the Kyber shared secret would fix
-> this, but that is a new container version rather than a patch. Until then,
-> treat PQC mode as protecting *confidentiality against a future quantum
-> adversary*, not as the stronger steganographic channel.
-
-> **These are the NIST round-3 parameter sets, not the final standards.** `pqcrypto-kyber` and `pqcrypto-dilithium` wrap PQClean's Kyber and Dilithium, which predate FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA) and differ from them in key derivation and hashing. SNOW2 v2 containers are therefore **not interoperable** with ML-KEM / ML-DSA implementations, and should not be described as NIST-standardized. Migrating would mean moving to `pqcrypto-mlkem` / `pqcrypto-mldsa` and minting a new container version.
-
-### Build with PQC support
-```bash
-cargo build --release --features pqc
-```
-
-### Generate a PQC keypair
-```bash
-snow2 pqc-keygen --pk-out key.pk --sk-out key.sk
-# With encrypted secret key:
-snow2 pqc-keygen --pk-out key.pk --sk-out key.sk --sk-password "my password"
-```
-
-### Embed with PQC
-```bash
-snow2 embed \
-  --mode classic-trailing \
-  --carrier carrier.txt \
-  --out out.txt \
-  --input secret.txt \
-  --pqc-pk key.pk
-```
-
-### Extract with PQC
-```bash
-snow2 extract \
-  --mode classic-trailing \
-  --carrier out.txt \
-  --out recovered.txt \
-  --pqc-sk key.sk
-# If key is encrypted:
-snow2 extract \
-  --mode classic-trailing \
-  --carrier out.txt \
-  --out recovered.txt \
-  --pqc-sk key.sk \
-  --pqc-sk-password "my password"
-```
-
-> **Note:** PQC containers are significantly larger than password-based containers (~10 KB overhead for Kyber ciphertext + Dilithium signature). Ensure your carrier has enough lines.
-
----
-
 ## Steganography Modes
 
 SNOW2 supports multiple embedding strategies.
@@ -428,6 +356,78 @@ snow2 embed \
   --kdf-iters 4 \
   --kdf-par 1
 ```
+
+---
+
+## Post-Quantum Cryptography (Optional)
+
+SNOW2 supports **hybrid post-quantum encryption** via the optional `pqc` feature flag.
+
+When enabled, containers use a **Version 2** format with:
+
+- **Kyber1024** — lattice-based key encapsulation, via `pqcrypto-kyber` 0.8
+- **Dilithium5** — lattice-based digital signatures, via `pqcrypto-dilithium` 0.5
+- **Hybrid encryption** — Kyber KEM shared secret → HKDF → XChaCha20-Poly1305
+- **Authenticated containers** — every PQC container is signed with Dilithium5
+- **Encrypted key storage** — secret keys can be encrypted at rest with password-derived AEAD
+  - Versioned format (`SNOW2EK\0` magic + version byte) for future evolution
+  - Version byte authenticated as AEAD AAD to prevent downgrade attacks
+- **Hardened file permissions** — secret key files written with 0o600 (Unix) via atomic rename
+
+PQC mode does not use passwords. Instead, you generate a keypair and use key files.
+
+> **PQC carriers do not get the v4 hardening.** The v4 outer AEAD is keyed by
+> Argon2id over the password, and PQC mode has no password, so PQC containers
+> are embedded with the pre-v4 bitstream: CRC-32 framing, no constant-size
+> bucket padding, and no random fill of unused lines. Two consequences follow —
+> the payload length is observable from how many lines carry markers, and only
+> those lines carry content, so the message/padding boundary that v4 removes is
+> visible again. Keying the outer layer from the Kyber shared secret would fix
+> this, but that is a new container version rather than a patch. Until then,
+> treat PQC mode as protecting *confidentiality against a future quantum
+> adversary*, not as the stronger steganographic channel.
+
+> **These are the NIST round-3 parameter sets, not the final standards.** `pqcrypto-kyber` and `pqcrypto-dilithium` wrap PQClean's Kyber and Dilithium, which predate FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA) and differ from them in key derivation and hashing. SNOW2 v2 containers are therefore **not interoperable** with ML-KEM / ML-DSA implementations, and should not be described as NIST-standardized. Migrating would mean moving to `pqcrypto-mlkem` / `pqcrypto-mldsa` and minting a new container version.
+
+### Build with PQC support
+```bash
+cargo build --release --features pqc
+```
+
+### Generate a PQC keypair
+```bash
+snow2 pqc-keygen --pk-out key.pk --sk-out key.sk
+# With encrypted secret key:
+snow2 pqc-keygen --pk-out key.pk --sk-out key.sk --sk-password "my password"
+```
+
+### Embed with PQC
+```bash
+snow2 embed \
+  --mode classic-trailing \
+  --carrier carrier.txt \
+  --out out.txt \
+  --input secret.txt \
+  --pqc-pk key.pk
+```
+
+### Extract with PQC
+```bash
+snow2 extract \
+  --mode classic-trailing \
+  --carrier out.txt \
+  --out recovered.txt \
+  --pqc-sk key.sk
+# If key is encrypted:
+snow2 extract \
+  --mode classic-trailing \
+  --carrier out.txt \
+  --out recovered.txt \
+  --pqc-sk key.sk \
+  --pqc-sk-password "my password"
+```
+
+> **Note:** PQC containers are significantly larger than password-based containers (~10 KB overhead for Kyber ciphertext + Dilithium signature). Ensure your carrier has enough lines.
 
 ---
 

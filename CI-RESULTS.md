@@ -136,9 +136,19 @@ pass in a debug build; it now uses `env!("CARGO_BIN_EXE_snow2")`.
 | `stress_test.mjs` | ✅ | — |
 | Fuzz | — | — |
 
-Fuzz targets exist under `fuzz/` but are not wired into CI; they require a
-nightly toolchain and a time budget, so they remain a manual gate. See
-FUZZ-RESULTS.md. This row is left blank deliberately rather than implied.
+**Fuzz row is blank on purpose.** `.github/workflows/fuzz.yml` exists —
+scheduled daily at 04:17 UTC, 8 targets in a `fail-fast: false` matrix, 60s per
+target, crash artifacts uploaded on failure — but it is **not** a PR gate, and
+this row stays blank until that workflow has produced at least one completed
+run. A workflow file is not coverage; a green run is.
+
+It is deliberately off the PR path. It needs a nightly toolchain and a minute
+per target, so as a required check it would be the first thing bypassed by
+someone in a hurry — and a gate people route around teaches the team that red is
+negotiable. That is the same class of mistake as `needs: check`: a gate that
+appears to cover something while quietly not running.
+
+Historical manual results (~6.3M runs, 0 crashes) are in FUZZ-RESULTS.md.
 
 **All Rust quality gates are covered by CI** — but coverage is not the same as
 execution. See [CI Outage](#ci-outage-2026-03-02--2026-09-16): the `needs: check`
