@@ -86,28 +86,44 @@ pass in a debug build; it now uses `env!("CARGO_BIN_EXE_snow2")`.
 
 ## CI Workflow Files
 
-### `.github/workflows/ci.yml` (NEW — added in this audit)
+### `.github/workflows/ci.yml`
 
-**Purpose:** Full Rust CI: lint, test, WASM build + test
+**Purpose:** Full Rust CI: lint, test (both feature configurations), WASM build + test
 **Trigger:** push to `main`, pull requests to `main`, manual dispatch
 
-**Jobs:**
+**Jobs — note that none of them declare `needs:`.** They run in parallel, on
+purpose: see [Structural fix](#structural-fix-2026-09-16).
 
 1. **check** — Check, Lint, Format
    - `ubuntu-latest`, Rust stable + clippy + rustfmt
    - `cargo fmt --check`
    - `cargo clippy --all-targets -- -D warnings`
+   - `cargo clippy --all-targets --features pqc -- -D warnings`
    - `cargo build --release`
 
-2. **test** — Rust Tests (needs: check)
+2. **test** — Rust Tests
    - `ubuntu-latest`, Rust stable
-   - `cargo test -- --test-threads=2`
+   - `cargo test --no-fail-fast -- --test-threads=2` (178 tests)
 
-3. **wasm** — WASM Build + Tests (needs: check)
+3. **test-pqc** — Rust Tests (pqc feature)
+   - `ubuntu-latest`, Rust stable
+   - `cargo test --features pqc --no-fail-fast -- --test-threads=2` (188 tests)
+
+4. **wasm** — WASM Build + Tests
    - `ubuntu-latest`, Rust stable + `wasm32-unknown-unknown`
    - `wasm-pack build snow2_wasm --target web --out-dir ../web_demo/pkg`
    - `node web_demo/test_wasm.mjs` (48 tests)
    - `node web_demo/test_download_upload.mjs` (12 tests)
+   - `node web_demo/stress_test.mjs` (steg coverage + chi-squared, 20 rounds)
+
+### `.github/workflows/fuzz.yml`
+
+**Purpose:** Bounded libFuzzer runs over all 8 targets
+**Trigger:** schedule (04:17 UTC daily), manual dispatch. **Not** a PR gate.
+
+1. **fuzz** — matrix of 8 targets, `fail-fast: false`, 60s each,
+   `-rss_limit_mb=4096`, 20-minute job timeout, crash/corpus artifacts uploaded
+   on failure (30-day retention)
 
 ### `.github/workflows/pages.yml` (existing)
 
@@ -134,13 +150,25 @@ pass in a debug build; it now uses `env!("CARGO_BIN_EXE_snow2")`.
 | `test_wasm.mjs` | ✅ | ✅ |
 | `test_download_upload.mjs` | ✅ | — |
 | `stress_test.mjs` | ✅ | — |
-| Fuzz | — | — |
+| Fuzz (8 targets) | ✅ (scheduled) | — |
 
-**Fuzz row is blank on purpose.** `.github/workflows/fuzz.yml` exists —
-scheduled daily at 04:17 UTC, 8 targets in a `fail-fast: false` matrix, 60s per
-target, crash artifacts uploaded on failure — but it is **not** a PR gate, and
-this row stays blank until that workflow has produced at least one completed
-run. A workflow file is not coverage; a green run is.
+**Fuzz row: scheduled, not a PR gate.** `.github/workflows/fuzz.yml` runs all 8
+targets daily at 04:17 UTC in a `fail-fast: false` matrix, 60s per target, with
+crash and corpus artifacts uploaded on failure.
+
+The row was held blank until the workflow had actually produced a completed run,
+on the principle that a workflow file is not coverage. It has now:
+
+| | |
+|---|---|
+| Run | [35162225668](https://github.com/systemslibrarian/snow2/actions/runs/35162225668) |
+| Trigger | `workflow_dispatch`, 30s per target (validation run) |
+| Date | 2026-09-16 |
+| Result | **8/8 targets success**, 0 crashes |
+
+Scheduled runs use the 60s default. The `✅ (scheduled)` marking above means
+exactly that — covered by a cron workflow, not by the PR gate — and nothing
+more.
 
 It is deliberately off the PR path. It needs a nightly toolchain and a minute
 per target, so as a required check it would be the first thing bypassed by
@@ -150,9 +178,12 @@ appears to cover something while quietly not running.
 
 Historical manual results (~6.3M runs, 0 crashes) are in FUZZ-RESULTS.md.
 
-**All Rust quality gates are covered by CI** — but coverage is not the same as
-execution. See [CI Outage](#ci-outage-2026-03-02--2026-09-16): the `needs: check`
-dependency means a `cargo fmt` break silently skips every gate below it.
+**Coverage is not the same as execution.** Every ✅ above was true as a workflow
+declaration during the outage too — the jobs simply were not running. Each row
+now corresponds to a step that has been observed succeeding in a real run, and
+that is the standard this file holds itself to going forward: cite a run, not a
+YAML file. The `needs: check` dependency that made the difference invisible has
+been removed; see [CI Outage](#ci-outage-2026-03-02--2026-09-16).
 
 ---
 
